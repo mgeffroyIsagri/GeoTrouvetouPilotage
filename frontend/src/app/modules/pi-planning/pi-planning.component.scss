@@ -1,0 +1,293 @@
+:host { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+
+// ── Layout principal ──────────────────────────────────
+.pi-planning {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+
+  &--with-panel {
+    .calendar-wrapper { margin-right: 340px; }
+  }
+}
+
+// ── Toolbar ───────────────────────────────────────────
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0 12px;
+  gap: 12px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.toolbar-left, .toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pi-select {
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 13px;
+  background: var(--color-surface);
+  max-width: 200px;
+}
+
+.sprint-tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 3px;
+}
+
+.sprint-tab {
+  padding: 5px 14px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s;
+
+  &:hover { background: var(--color-background); }
+  &--active { background: var(--color-primary); color: #fff; font-weight: 600; }
+
+  .sprint-days {
+    background: rgba(255,255,255,0.25);
+    border-radius: 8px;
+    padding: 1px 5px;
+    font-size: 10px;
+  }
+}
+
+// ── Formulaire nouveau PI ─────────────────────────────
+.pi-form-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.pi-form-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; }
+.form-error { color: var(--color-error); font-size: 12px; margin-bottom: 8px; }
+.form-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; label { font-size: 12px; color: var(--color-text-secondary); font-weight: 500; } }
+.form-input { padding: 7px 10px; border: 1px solid var(--color-border); border-radius: 4px; font-size: 13px; &:focus { outline: none; border-color: var(--color-primary); } }
+.form-actions { display: flex; gap: 8px; margin-top: 12px; }
+
+// ── Calendrier ────────────────────────────────────────
+.calendar-wrapper {
+  flex: 1;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  transition: margin-right 0.2s;
+}
+
+.calendar-scroll {
+  overflow: auto;
+  flex: 1;
+}
+
+// En-tête semaines
+.header-weeks {
+  display: flex;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #f1f3f4;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.week-cell {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  padding: 3px 0;
+  text-align: center;
+  border-right: 2px solid var(--color-border);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+// En-tête jours
+.header-days {
+  display: flex;
+  position: sticky;
+  top: 24px;
+  z-index: 10;
+  background: #f8f9fa;
+  border-bottom: 2px solid var(--color-border);
+}
+
+.day-col {
+  width: 36px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 10px;
+
+  &--friday {
+    border-left: 2px solid #bdbdbd;
+  }
+
+  .day-name { color: var(--color-text-secondary); font-weight: 500; text-transform: uppercase; }
+  .day-num  { font-weight: 700; font-size: 12px; }
+}
+
+.member-col {
+  width: 180px;
+  flex-shrink: 0;
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: inherit;
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+}
+
+.col-header-text { font-size: 11px; font-weight: 700; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+
+// Ligne membre
+.grid-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--color-border);
+  min-height: 52px;
+
+  &:last-child { border-bottom: none; }
+  &:hover .add-leave-btn { opacity: 1; }
+}
+
+.member-info {
+  width: 180px;
+  flex-shrink: 0;
+  padding: 6px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+}
+
+.member-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.member-footer { display: flex; align-items: center; gap: 6px; }
+
+.profile-badge {
+  font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px;
+  &--dev { background: #e8f0fe; color: #1a73e8; }
+  &--qa  { background: #e6f4ea; color: #1e8e3e; }
+  &--psm { background: #fce8b2; color: #f09300; }
+}
+
+.capacity-label { font-size: 11px; color: var(--color-text-secondary); font-weight: 600; }
+
+// Zone blocs
+.blocks-zone {
+  position: relative;
+  flex-shrink: 0;
+  height: 100%;
+}
+
+.day-bg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+
+  &--friday { border-left: 2px solid #e0e0e0; }
+}
+
+// Bouton congé
+.add-leave-btn {
+  opacity: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 6px;
+  transition: opacity 0.15s;
+  align-self: center;
+  flex-shrink: 0;
+}
+
+// ── Légende ───────────────────────────────────────────
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--color-border);
+  background: #fafafa;
+  flex-shrink: 0;
+}
+
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--color-text-secondary); }
+
+.legend-dot {
+  width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0;
+  &.block--stories_dev     { background: var(--block-stories-dev); }
+  &.block--stories_qa      { background: var(--block-stories-qa); }
+  &.block--bugs_maintenance { background: var(--block-bugs); }
+  &.block--imprevus        { background: var(--block-imprevus); }
+  &.block--agility         { background: var(--block-agility); }
+  &.block--reunions        { background: var(--block-reunions); }
+  &.block--psm             { background: var(--block-psm); }
+  &.block--montee_competence { background: var(--block-montee-competence); }
+  &.block--conges          { background: var(--block-conges); }
+}
+
+// ── Panneau latéral ───────────────────────────────────
+app-work-item-panel {
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 20;
+  box-shadow: -4px 0 16px rgba(0,0,0,0.12);
+}
+
+// ── Modal ─────────────────────────────────────────────
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-card {
+  background: var(--color-surface); border-radius: 8px; padding: 24px; width: 420px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  h3 { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
+}
+
+// ── Boutons ───────────────────────────────────────────
+.btn {
+  padding: 7px 16px; border: none; border-radius: 4px; font-size: 13px; font-weight: 500; cursor: pointer;
+  &-primary { background: var(--color-primary); color: #fff; &:hover:not(:disabled) { background: #1557b0; } }
+  &-secondary { background: var(--color-surface); border: 1px solid var(--color-border); &:hover:not(:disabled) { background: var(--color-background); } }
+  &:disabled { opacity: 0.6; cursor: not-allowed; }
+}
+
+.empty-state { padding: 40px; text-align: center; color: var(--color-text-secondary); }

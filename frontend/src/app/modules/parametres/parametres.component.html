@@ -1,0 +1,266 @@
+<div class="parametres">
+  <header class="parametres__header">
+    <h1 class="page-title">Paramètres</h1>
+    <div class="tab-nav">
+      <button class="tab-btn" [class.tab-btn--active]="activeTab === 'settings'" (click)="onTabChange('settings')">
+        ⚙️ Configuration
+      </button>
+      <button class="tab-btn" [class.tab-btn--active]="activeTab === 'sync-data'" (click)="onTabChange('sync-data')">
+        🔄 Données synchronisées
+      </button>
+    </div>
+  </header>
+
+  <!-- ===== ONGLET CONFIGURATION ===== -->
+  @if (activeTab === 'settings') {
+    <div class="tab-content">
+      <div class="settings-grid">
+        @for (group of settingGroups; track group.id) {
+          <section class="settings-card">
+            <h2 class="card-title">{{ group.icon }} {{ group.label }}</h2>
+
+            @for (setting of getSettingsForGroup(group); track setting.key) {
+              <div class="setting-row">
+                <label class="setting-label" [for]="setting.key">
+                  {{ setting.description ?? setting.key }}
+                </label>
+                <div class="setting-input-wrap">
+                  @if (isTextarea(setting.key)) {
+                    <textarea
+                      [id]="setting.key"
+                      class="setting-textarea"
+                      [(ngModel)]="setting.value"
+                      (blur)="saveSetting(setting)"
+                      placeholder="JSON — ex: {&quot;sprint_1&quot;: 0.8}"
+                      rows="3"
+                    ></textarea>
+                  } @else {
+                    <input
+                      [id]="setting.key"
+                      class="setting-input"
+                      [type]="isSensitive(setting.key) ? 'password' : 'text'"
+                      [(ngModel)]="setting.value"
+                      (blur)="saveSetting(setting)"
+                    />
+                  }
+                  @if (saving[setting.key]) {
+                    <span class="indicator saving">⏳</span>
+                  } @else if (saved[setting.key]) {
+                    <span class="indicator saved">✓</span>
+                  }
+                </div>
+              </div>
+            }
+
+            <!-- Bouton test connexion dans la section AZDO -->
+            @if (group.id === 'azdo') {
+              <div class="test-connection-row">
+                <button class="btn btn-secondary" (click)="testConnection()" [disabled]="connectionTesting">
+                  {{ connectionTesting ? 'Test en cours…' : 'Tester la connexion' }}
+                </button>
+                @if (connectionTest) {
+                  <span class="connection-badge" [class.connection-badge--ok]="connectionTest.ok" [class.connection-badge--error]="!connectionTest.ok">
+                    {{ connectionTest.ok ? '✓ ' + connectionTest.details : '✗ ' + connectionTest.error }}
+                  </span>
+                }
+              </div>
+            }
+          </section>
+        }
+      </div>
+    </div>
+  }
+
+  <!-- ===== ONGLET DONNÉES SYNCHRONISÉES ===== -->
+  @if (activeTab === 'sync-data') {
+    <div class="tab-content">
+
+      <!-- Synchronisation -->
+      <section class="data-section">
+        <div class="section-header">
+          <h2 class="section-title">Synchronisation Azure DevOps</h2>
+          <button class="btn btn-primary" (click)="triggerSync()" [disabled]="syncLoading">
+            {{ syncLoading ? '⏳ Synchronisation…' : '🔄 Synchroniser maintenant' }}
+          </button>
+        </div>
+
+        @if (syncLogs.length > 0) {
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Statut</th>
+                <th>Détails</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (log of syncLogs; track log.id) {
+                <tr>
+                  <td class="col-date">{{ log.synced_at | date:'dd/MM/yyyy HH:mm' }}</td>
+                  <td>
+                    <span class="status-badge" [class.status-badge--success]="log.status === 'success'" [class.status-badge--error]="log.status === 'error'">
+                      {{ log.status === 'success' ? '✓ Succès' : '✗ Erreur' }}
+                    </span>
+                  </td>
+                  <td class="col-details">{{ parseSyncDetails(log.details) }}</td>
+                  <td>{{ log.items_synced }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        } @else {
+          <p class="empty-hint">Aucune synchronisation effectuée.</p>
+        }
+      </section>
+
+      <!-- Work Items -->
+      <section class="data-section">
+        <div class="section-header">
+          <h2 class="section-title">Work Items <span class="count-badge">{{ workItemsTotal }}</span></h2>
+        </div>
+
+        <div class="filter-bar">
+          <input
+            class="search-input"
+            type="text"
+            placeholder="Rechercher dans les titres…"
+            [(ngModel)]="wiSearchText"
+            (input)="onWiSearch()"
+          />
+          <div class="filter-chips">
+            @for (type of workItemTypes; track type) {
+              <button
+                class="chip"
+                [class.chip--active]="wiSelectedTypes.has(type)"
+                (click)="toggleTypeFilter(type)"
+              >
+                <span class="wi-type-dot" [class]="'wi-dot-' + type.toLowerCase().replace(' ', '-')"></span>
+                {{ type }}
+              </button>
+            }
+          </div>
+        </div>
+
+        @if (workItemsLoading && workItems.length === 0) {
+          <p class="empty-hint">Chargement…</p>
+        } @else if (workItems.length === 0) {
+          <p class="empty-hint">Aucun work item synchronisé.</p>
+        } @else {
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Type</th>
+                <th>Titre</th>
+                <th>État</th>
+                <th>Itération</th>
+                <th>Assigné</th>
+                <th class="col-num">Pts</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (wi of workItems; track wi.id) {
+                <tr>
+                  <td class="col-id">{{ wi.id }}</td>
+                  <td>
+                    <span class="wi-type-badge" [class]="'wi-type-' + wi.type.toLowerCase().replace(' ', '-')">
+                      {{ wi.type }}
+                    </span>
+                  </td>
+                  <td class="col-title">{{ wi.title }}</td>
+                  <td>{{ wi.state ?? '—' }}</td>
+                  <td class="col-iter">{{ wi.iteration_path ? wi.iteration_path.split('\\')[wi.iteration_path.split('\\').length - 1] : '—' }}</td>
+                  <td>{{ wi.assigned_to ?? '—' }}</td>
+                  <td class="col-num">{{ wi.story_points ?? '—' }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+
+          @if (hasMoreWorkItems()) {
+            <div class="load-more">
+              <button class="btn btn-secondary" (click)="loadMoreWorkItems()" [disabled]="workItemsLoading">
+                {{ workItemsLoading ? 'Chargement…' : 'Voir plus (' + (workItemsTotal - workItemsSkip) + ' restants)' }}
+              </button>
+            </div>
+          }
+        }
+      </section>
+
+      <!-- Iterations -->
+      <section class="data-section">
+        <div class="section-header">
+          <h2 class="section-title">Itérations <span class="count-badge">{{ iterations.length }}</span></h2>
+        </div>
+
+        @if (iterations.length === 0) {
+          <p class="empty-hint">Aucune itération synchronisée.</p>
+        } @else {
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Chemin</th>
+                <th>Début</th>
+                <th>Fin</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (it of iterations; track it.id) {
+                <tr>
+                  <td>{{ it.name }}</td>
+                  <td class="col-path">{{ it.path }}</td>
+                  <td>{{ it.start_date | date:'dd/MM/yyyy' }}</td>
+                  <td>{{ it.end_date | date:'dd/MM/yyyy' }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        }
+      </section>
+
+      <!-- Équipe -->
+      <section class="data-section">
+        <div class="section-header">
+          <h2 class="section-title">Membres de l'équipe <span class="count-badge">{{ teamMembers.length }}</span></h2>
+        </div>
+
+        @if (teamMembers.length === 0) {
+          <p class="empty-hint">Aucun membre synchronisé.</p>
+        } @else {
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Nom</th>
+                <th>Email</th>
+                <th>Profil</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (member of teamMembers; track member.id) {
+                <tr>
+                  <td>{{ member.display_name }}</td>
+                  <td>{{ member.unique_name ?? '—' }}</td>
+                  <td>
+                    <select
+                      class="profile-select"
+                      [value]="member.profile"
+                      (change)="updateProfile(member, $any($event.target).value)"
+                      [disabled]="profileSaving[member.id]"
+                    >
+                      <option value="Dev">Dev</option>
+                      <option value="QA">QA</option>
+                      <option value="PSM">PSM</option>
+                    </select>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        }
+      </section>
+
+    </div>
+  }
+</div>

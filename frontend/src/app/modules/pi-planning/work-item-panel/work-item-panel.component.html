@@ -1,0 +1,79 @@
+<div class="panel">
+  <div class="panel-header">
+    <span class="panel-title">Détail Work Item</span>
+    <button class="close-btn" (click)="close()">✕</button>
+  </div>
+
+  @if (loading) {
+    <p class="panel-hint">Chargement…</p>
+  }
+
+  @if (!block?.work_item_id && !showPicker) {
+    <div class="panel-empty">
+      <p>Aucun work item associé à cette brique.</p>
+      <button class="btn btn-primary" (click)="openPicker()">Associer un Work Item</button>
+    </div>
+  }
+
+  @if (workItem && !showPicker) {
+    <div class="wi-detail">
+      <div class="wi-meta">
+        <span class="wi-id">#{{ workItem.id }}</span>
+        <span class="wi-type">{{ workItem.type }}</span>
+        @if (workItem.state) {
+          <span class="wi-state">{{ workItem.state }}</span>
+        }
+      </div>
+      <h2 class="wi-title">{{ workItem.title }}</h2>
+
+      @if (workItem.story_points) {
+        <div class="wi-attr"><span class="attr-label">Story Points</span><span>{{ workItem.story_points }}</span></div>
+      }
+      @if (workItem.assigned_to) {
+        <div class="wi-attr"><span class="attr-label">Assigné à</span><span>{{ workItem.assigned_to }}</span></div>
+      }
+      @if (workItem.iteration_path) {
+        <div class="wi-attr"><span class="attr-label">Itération</span><span>{{ workItem.iteration_path!.split('\\').pop() || workItem.iteration_path }}</span></div>
+      }
+
+      @if (workItem.description) {
+        <div class="wi-section">
+          <h3 class="wi-section-title">Description</h3>
+          <div class="wi-html" [innerHTML]="workItem.description"></div>
+        </div>
+      }
+      @if (workItem.acceptance_criteria) {
+        <div class="wi-section">
+          <h3 class="wi-section-title">Critères d'acceptation</h3>
+          <div class="wi-html" [innerHTML]="workItem.acceptance_criteria"></div>
+        </div>
+      }
+
+      <button class="btn btn-secondary mt-8" (click)="openPicker()">Changer le Work Item</button>
+    </div>
+  }
+
+  @if (showPicker) {
+    <div class="picker">
+      <input
+        class="picker-search"
+        type="text"
+        placeholder="Rechercher une User Story…"
+        [(ngModel)]="searchText"
+        (input)="onSearchChange()"
+      />
+      <ul class="picker-list">
+        @for (wi of availableItems; track wi.id) {
+          <li class="picker-item" (click)="assignWorkItem(wi)">
+            <span class="picker-id">#{{ wi.id }}</span>
+            <span class="picker-title">{{ wi.title }}</span>
+            @if (wi.story_points) {
+              <span class="picker-pts">{{ wi.story_points }}pt</span>
+            }
+          </li>
+        }
+      </ul>
+      <button class="btn btn-secondary" (click)="showPicker = false">Annuler</button>
+    </div>
+  }
+</div>

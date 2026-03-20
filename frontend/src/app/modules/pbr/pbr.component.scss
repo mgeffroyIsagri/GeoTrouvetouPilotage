@@ -1,0 +1,76 @@
+.pbr__header {
+  margin-bottom: 24px;
+}
+
+.page-title {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.session-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+
+  &.active {
+    background-color: #e6f4ea;
+    color: #1e8e3e;
+  }
+}
+
+.session-info {
+  margin-bottom: 20px;
+}
+
+.votes-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--color-surface);
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+
+  th,
+  td {
+    padding: 10px 14px;
+    text-align: left;
+    font-size: 13px;
+  }
+
+  th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  tr:not(:last-child) td {
+    border-bottom: 1px solid var(--color-border);
+  }
+}
+
+.dor-badge {
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  line-height: 28px;
+  text-align: center;
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: 13px;
+  background-color: #e0e0e0;
+  color: #333;
+
+  &.dor-5 { background-color: #1e8e3e; color: white; }
+  &.dor-4 { background-color: #34a853; color: white; }
+  &.dor-3 { background-color: #fbbc04; color: #333; }
+  &.dor-2 { background-color: #ff6d00; color: white; }
+  &.dor-1 { background-color: #d93025; color: white; }
+}
+
+.empty-state {
+  padding: 40px;
+  text-align: center;
+  color: var(--color-text-secondary);
+}

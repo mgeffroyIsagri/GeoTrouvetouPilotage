@@ -1,0 +1,51 @@
+/* Styles globaux GeoTrouvetouPilotage */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --color-primary: #1a73e8;
+  --color-accent: #fbbc04;
+  --color-surface: #ffffff;
+  --color-background: #f5f5f5;
+  --color-text: #202124;
+  --color-text-secondary: #5f6368;
+  --color-border: #dadce0;
+  --color-error: #d93025;
+  --color-success: #1e8e3e;
+
+  /* Couleurs des catégories de briques (modifiables via paramètres) */
+  --block-stories-dev: #4285f4;
+  --block-stories-qa: #34a853;
+  --block-bugs: #ea4335;
+  --block-imprevus: #ff6d00;
+  --block-agility: #9c27b0;
+  --block-reunions: #795548;
+  --block-psm: #00acc1;
+  --block-montee-competence: #ff8f00;
+  --block-conges: #bdbdbd;
+
+  --nav-width: 240px;
+  --header-height: 56px;
+}
+
+html,
+body {
+  height: 100%;
+  font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+  font-size: 14px;
+  color: var(--color-text);
+  background-color: var(--color-background);
+}
+
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+button {
+  cursor: pointer;
+}

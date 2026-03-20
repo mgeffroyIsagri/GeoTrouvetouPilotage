@@ -1,0 +1,211 @@
+<div class="pi-planning" [class.pi-planning--with-panel]="showPanel">
+  <!-- ═══ BARRE D'OUTILS ═══ -->
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <!-- Sélecteur PI -->
+      @if (piList.length > 0) {
+        <select class="pi-select" (change)="selectPI(piList[$any($event.target).selectedIndex])">
+          @for (pi of piList; track pi.id) {
+            <option [selected]="pi.id === activePI?.id">{{ pi.name }}</option>
+          }
+        </select>
+      }
+      <button class="btn btn-secondary" (click)="showPIForm = !showPIForm">+ Nouveau PI</button>
+
+      <!-- Onglets sprint -->
+      @if (activePI) {
+        <div class="sprint-tabs">
+          @for (s of SPRINT_CONFIG; track s.number) {
+            <button
+              class="sprint-tab"
+              [class.sprint-tab--active]="selectedSprint === s.number"
+              (click)="selectSprint(s.number)"
+            >
+              {{ s.label }}
+              <span class="sprint-days">{{ s.workingDays }}j</span>
+            </button>
+          }
+        </div>
+      }
+    </div>
+
+    <div class="toolbar-right">
+      @if (activePI && teamMembers.length > 0) {
+        <button class="btn btn-primary" (click)="generatePlanning()" [disabled]="generating">
+          {{ generating ? '⏳ Génération…' : '⚡ Générer la capacité' }}
+        </button>
+      }
+    </div>
+  </div>
+
+  <!-- ═══ FORMULAIRE NOUVEAU PI ═══ -->
+  @if (showPIForm) {
+    <div class="pi-form-card">
+      <h3 class="pi-form-title">Nouveau PI</h3>
+      @if (piFormError) { <p class="form-error">{{ piFormError }}</p> }
+      <div class="form-row">
+        <label>Nom du PI</label>
+        <input type="text" [(ngModel)]="newPIForm.name" placeholder="ex: PI 2025 Q2" class="form-input" />
+      </div>
+      <div class="form-row">
+        <label>Date de début <small>(doit être un vendredi)</small></label>
+        <input type="date" [(ngModel)]="newPIForm.start_date" class="form-input" />
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" (click)="createPI()">Créer</button>
+        <button class="btn btn-secondary" (click)="showPIForm = false">Annuler</button>
+      </div>
+    </div>
+  }
+
+  <!-- ═══ PAS DE PI ═══ -->
+  @if (!activePI) {
+    <div class="empty-state">
+      <p>Aucun PI configuré. Créez un PI pour commencer.</p>
+    </div>
+  }
+
+  <!-- ═══ CALENDRIER ═══ -->
+  @if (activePI && workingDays.length > 0) {
+    <div class="calendar-wrapper">
+      <div class="calendar-scroll">
+
+        <!-- En-tête semaines -->
+        <div class="header-weeks">
+          <div class="member-col"></div>
+          @for (wg of weekGroups; track wg.label) {
+            <div class="week-cell" [style.width.px]="wg.count * COL_WIDTH">{{ wg.label }}</div>
+          }
+        </div>
+
+        <!-- En-tête jours -->
+        <div class="header-days">
+          <div class="member-col">
+            <span class="col-header-text">Collaborateur</span>
+          </div>
+          @for (day of workingDays; track day) {
+            <div class="day-col" [class.day-col--friday]="isWeekStart(day)">
+              <span class="day-name">{{ formatDay(day).shortDay }}</span>
+              <span class="day-num">{{ formatDay(day).dayNum }}</span>
+            </div>
+          }
+        </div>
+
+        <!-- Lignes membres -->
+        @for (member of teamMembers; track member.id) {
+          <div class="grid-row" [style.height.px]="ROW_HEIGHT">
+
+            <!-- Infos membre -->
+            <div class="member-info">
+              <span class="member-name">{{ member.display_name }}</span>
+              <div class="member-footer">
+                <span class="profile-badge profile-badge--{{ member.profile.toLowerCase() }}">{{ member.profile }}</span>
+                <span class="capacity-label" title="Capacité stories">St = {{ getStoryCapacity(member.id) }}j</span>
+              </div>
+            </div>
+
+            <!-- Zone blocs -->
+            <div class="blocks-zone" [style.width.px]="gridWidth">
+
+              <!-- Lignes de jours (fond) -->
+              @for (day of workingDays; let i = $index; track day) {
+                <div
+                  class="day-bg"
+                  [class.day-bg--friday]="isWeekStart(day)"
+                  [style.left.px]="i * COL_WIDTH"
+                  [style.width.px]="COL_WIDTH"
+                ></div>
+              }
+
+              <!-- Layer 1 : blocs fixes (non draggables) -->
+              @for (block of getLayer1Blocks(member.id); track block.id) {
+                <app-planning-block
+                  [block]="block"
+                  [colWidth]="COL_WIDTH"
+                  [totalDays]="totalWorkingDays"
+                  [isDraggable]="false"
+                  (blockClicked)="onBlockClicked($any($event))"
+                />
+              }
+
+              <!-- Congés (draggables) -->
+              @for (leave of getLeavesForMember(member.id); track leave.id) {
+                <app-planning-block
+                  [block]="leave"
+                  [colWidth]="COL_WIDTH"
+                  [totalDays]="totalWorkingDays"
+                  [isDraggable]="true"
+                  [isLeave]="true"
+                  (blockMoved)="onBlockMoved($event)"
+                  (blockClicked)="deleteLeave($any($event).id)"
+                />
+              }
+
+              <!-- Layer 2 : stories (draggables + resizables) -->
+              @for (block of getLayer2Blocks(member.id); track block.id) {
+                <app-planning-block
+                  [block]="block"
+                  [colWidth]="COL_WIDTH"
+                  [totalDays]="totalWorkingDays"
+                  [isDraggable]="true"
+                  [isResizable]="true"
+                  (blockMoved)="onBlockMoved($event)"
+                  (blockResized)="onBlockResized($event)"
+                  (blockClicked)="onBlockClicked($any($event))"
+                />
+              }
+            </div>
+
+            <!-- Bouton + congé -->
+            <button class="add-leave-btn" (click)="startAddLeave(member.id)" title="Ajouter un congé">🏖️</button>
+
+          </div>
+        }
+
+        <!-- Légende -->
+        <div class="legend">
+          @for (entry of CATEGORY_LABELS | keyvalue; track entry.key) {
+            <div class="legend-item">
+              <span class="legend-dot block--{{ entry.key }}"></span>
+              <span>{{ entry.value }}</span>
+            </div>
+          }
+        </div>
+
+      </div>
+    </div>
+  }
+
+  <!-- ═══ PANNEAU WORK ITEM ═══ -->
+  @if (showPanel) {
+    <app-work-item-panel
+      [block]="selectedBlock"
+      [piId]="activePI?.id ?? null"
+      (closed)="closePanel()"
+      (workItemAssigned)="onWorkItemAssigned($event)"
+    />
+  }
+
+  <!-- ═══ MODAL AJOUT CONGÉ ═══ -->
+  @if (addingLeave) {
+    <div class="modal-overlay" (click)="addingLeave = null">
+      <div class="modal-card" (click)="$event.stopPropagation()">
+        <h3>Ajouter un congé</h3>
+        <div class="form-row">
+          <label>Type</label>
+          <select class="form-input" [(ngModel)]="addingLeave.label">
+            <option>CP</option><option>RTT</option><option>Maladie</option><option>Formation</option><option>Autre</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Jour (offset dans le sprint, 0 = vendredi 1er jour)</label>
+          <input type="number" class="form-input" min="0" [max]="totalWorkingDays - 1" step="0.5" #offsetInput value="0" />
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" (click)="confirmAddLeave(addingLeave.memberId, +offsetInput.value)">Ajouter</button>
+          <button class="btn btn-secondary" (click)="addingLeave = null">Annuler</button>
+        </div>
+      </div>
+    </div>
+  }
+</div>

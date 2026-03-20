@@ -1,0 +1,46 @@
+<div class="pbr">
+  <header class="pbr__header">
+    <h1 class="page-title">PBR / Refinement</h1>
+  </header>
+
+  @if (activeSession) {
+    <div class="session-info">
+      <span class="session-badge active">Session active : {{ activeSession.name }}</span>
+    </div>
+
+    @if (votes.length === 0) {
+      <p class="empty-state">Aucun vote pour cette session.</p>
+    }
+
+    <table class="votes-table">
+      <thead>
+        <tr>
+          <th>Work Item</th>
+          <th>Note DOR</th>
+          <th>Story Points</th>
+          <th>Charge Dev (j)</th>
+          <th>Charge QA (j)</th>
+          <th>Commentaire</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (vote of votes; track vote.id) {
+          <tr>
+            <td>#{{ vote.work_item_id }}</td>
+            <td>
+              <span class="dor-badge dor-{{ vote.dor_note }}">{{ vote.dor_note ?? '-' }}</span>
+            </td>
+            <td>{{ vote.story_points ?? '-' }}</td>
+            <td>{{ vote.charge_dev_days ?? '-' }}</td>
+            <td>{{ vote.charge_qa_days ?? '-' }}</td>
+            <td>{{ vote.comment ?? '-' }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  } @else {
+    <div class="empty-state">
+      Aucune session PBR active.
+    </div>
+  }
+</div>

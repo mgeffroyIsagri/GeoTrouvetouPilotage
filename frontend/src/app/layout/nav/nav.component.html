@@ -1,0 +1,21 @@
+<nav class="nav">
+  <div class="nav-header">
+    <span class="nav-logo">GeoTrouvetou</span>
+    <span class="nav-subtitle">Pilotage</span>
+  </div>
+
+  <ul class="nav-list">
+    @for (item of navItems; track item.route) {
+      <li>
+        <a
+          class="nav-item"
+          [routerLink]="item.route"
+          routerLinkActive="nav-item--active"
+        >
+          <span class="nav-icon">{{ item.icon }}</span>
+          <span class="nav-label">{{ item.label }}</span>
+        </a>
+      </li>
+    }
+  </ul>
+</nav>

@@ -1,0 +1,45 @@
+.block {
+  position: absolute;
+  top: 4px;
+  height: calc(100% - 8px);
+  border-radius: 4px;
+  transition: opacity 0.1s;
+  user-select: none;
+  overflow: hidden;
+
+  &--draggable { cursor: grab; }
+  &--active    { opacity: 0.75; cursor: grabbing; z-index: 50 !important; box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
+
+  // Layer 2 : stories, semi-transparentes pour voir layer 1 en dessous
+  &--layer2 {
+    opacity: 0.82;
+    z-index: 2;
+    border: 2px solid rgba(255,255,255,0.4);
+  }
+
+  // Catégories — couleurs (reprend les CSS vars)
+  &--stories_dev     { background: var(--block-stories-dev); z-index: 2; }
+  &--stories_qa      { background: var(--block-stories-qa);  z-index: 2; }
+  &--bugs_maintenance { background: var(--block-bugs); }
+  &--imprevus        { background: var(--block-imprevus); }
+  &--agility         { background: var(--block-agility); }
+  &--reunions        { background: var(--block-reunions); }
+  &--psm             { background: var(--block-psm); }
+  &--montee_competence { background: var(--block-montee-competence); }
+  &--conges          { background: var(--block-conges); z-index: 3; }
+
+  .resize-handle {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    cursor: ew-resize;
+    background: rgba(255,255,255,0.3);
+    border-radius: 0 4px 4px 0;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  &:hover .resize-handle { opacity: 1; }
+}
