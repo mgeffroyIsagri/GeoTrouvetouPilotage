@@ -9,6 +9,9 @@ class AzdoClient:
     API_VERSION = "7.0"
 
     def __init__(self, organization: str, project: str, pat: str):
+        # Accepte "https://dev.azure.com/MonOrg" ou juste "MonOrg"
+        if organization.startswith("http"):
+            organization = organization.rstrip("/").split("/")[-1]
         self.organization = organization
         self.project = project
         self.base_url = f"https://dev.azure.com/{organization}/{project}"
@@ -19,7 +22,9 @@ class AzdoClient:
         }
 
     async def get_iterations(self, team: str) -> list[dict]:
-        url = f"{self.base_url}/_apis/work/teamsettings/iterations"
+        team = (team or "").strip()
+        team_segment = f"/{team}" if team else ""
+        url = f"https://dev.azure.com/{self.organization}/{self.project}{team_segment}/_apis/work/teamsettings/iterations"
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 url,
@@ -53,6 +58,32 @@ class AzdoClient:
             items = resp.json().get("workItems", [])
             return [item["id"] for item in items]
 
+    async def get_work_item_detail(self, work_item_id: int) -> dict:
+        """Récupère un work item avec TOUS ses champs + relations.
+        Note : AZDO refuse la combinaison fields= + $expand=relations,
+        donc on fetche tous les champs sans filtre."""
+        url = f"{self.base_url}/_apis/wit/workitems/{work_item_id}"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                url,
+                headers=self.headers,
+                params={"$expand": "relations", "api-version": self.API_VERSION},
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_work_item_comments(self, work_item_id: int, top: int = 10) -> list[dict]:
+        """Récupère les commentaires/discussion d'un work item."""
+        url = f"{self.base_url}/_apis/wit/workitems/{work_item_id}/comments"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                url,
+                headers=self.headers,
+                params={"$top": top, "api-version": "7.1-preview.3"},
+            )
+            resp.raise_for_status()
+            return resp.json().get("comments", [])
+
     async def get_work_items(self, ids: list[int]) -> list[dict]:
         if not ids:
             return []
@@ -74,6 +105,8 @@ class AzdoClient:
                 "Microsoft.VSTS.Scheduling.CompletedWork",
                 "Microsoft.VSTS.Scheduling.RemainingWork",
                 "System.Parent",
+                "Microsoft.VSTS.Common.BusinessValue",
+                "Microsoft.VSTS.Scheduling.Effort",
             ]
             async with httpx.AsyncClient() as client:
                 resp = await client.get(

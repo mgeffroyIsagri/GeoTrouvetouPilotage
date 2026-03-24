@@ -32,6 +32,11 @@ export const routes: Routes = [
       import('./modules/parametres/parametres.component').then((m) => m.ParametresComponent),
   },
   {
+    path: 'logs',
+    loadComponent: () =>
+      import('./modules/logs/logs.component').then((m) => m.LogsComponent),
+  },
+  {
     path: '**',
     redirectTo: 'pi-planning',
   },

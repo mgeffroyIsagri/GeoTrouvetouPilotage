@@ -11,7 +11,8 @@ interface SettingGroup {
   keys: string[];
 }
 
-const WORK_ITEM_TYPES = ['Feature', 'Enabler Story', 'User Story', 'Bug', 'Task'];
+const WORK_ITEM_TYPES = ['Feature', 'Enabler Story', 'Enabler', 'User Story', 'Bug', 'Task', 'Maintenance', 'Question'];
+const WORK_ITEM_STATES = ['New', 'Active', 'Resolved', 'Closed', 'Removed'];
 
 @Component({
   selector: 'app-parametres',
@@ -30,7 +31,7 @@ export class ParametresComponent implements OnInit {
 
   readonly settingGroups: SettingGroup[] = [
     { id: 'azdo', label: 'Azure DevOps', icon: '☁️', keys: ['azdo_organization', 'azdo_project', 'azdo_team', 'azdo_pat'] },
-    { id: 'llm',  label: 'Intelligence Artificielle', icon: '🤖', keys: ['llm_provider', 'llm_model', 'llm_api_key'] },
+    { id: 'llm',  label: 'Intelligence Artificielle', icon: '🤖', keys: ['llm_provider', 'llm_model', 'llm_api_key', 'llm_endpoint'] },
     { id: 'matrices', label: 'Matrices de capacité', icon: '📊', keys: ['capacity_matrix_dev', 'capacity_matrix_qa', 'capacity_matrix_psm'] },
     { id: 'display', label: 'Affichage', icon: '🎨', keys: ['block_colors'] },
   ];
@@ -42,6 +43,7 @@ export class ParametresComponent implements OnInit {
   // Synchronisation
   syncLoading = false;
   syncLogs: SyncLog[] = [];
+  syncSinceDate = '';
 
   // Données synchronisées — Work Items
   workItems: WorkItem[] = [];
@@ -51,7 +53,10 @@ export class ParametresComponent implements OnInit {
   readonly workItemsLimit = 50;
   wiSearchText = '';
   wiSelectedTypes: Set<string> = new Set();
+  wiSelectedStates: Set<string> = new Set();
+  wiSelectedIteration = '';
   readonly workItemTypes = WORK_ITEM_TYPES;
+  readonly workItemStates = WORK_ITEM_STATES;
 
   // Données synchronisées — Iterations
   iterations: Iteration[] = [];
@@ -115,9 +120,9 @@ export class ParametresComponent implements OnInit {
 
   // --- Synchronisation ---
 
-  triggerSync(): void {
+  triggerSync(fullSync = false): void {
     this.syncLoading = true;
-    this.api.syncAzdo().subscribe({
+    this.api.syncAzdo(fullSync, fullSync ? undefined : (this.syncSinceDate || undefined)).subscribe({
       next: () => {
         this.syncLoading = false;
         this.loadSyncLogs();
@@ -143,10 +148,19 @@ export class ParametresComponent implements OnInit {
       if (d.iterations) parts.push(`${d.iterations} itération(s)`);
       if (d.members)    parts.push(`${d.members} membre(s)`);
       if (d.work_items) parts.push(`${d.work_items} work item(s)`);
+      if (d.since)      parts.push(`depuis ${new Date(d.since).toLocaleDateString('fr-FR')}`);
       return parts.join(' · ') || details;
     } catch {
       return details;
     }
+  }
+
+  parseSyncMode(details: string | null): string {
+    if (!details) return '';
+    try {
+      const d = JSON.parse(details);
+      return d.mode === 'full' ? 'Complète' : 'Incrémentale';
+    } catch { return ''; }
   }
 
   // --- Onglet données ---
@@ -165,19 +179,25 @@ export class ParametresComponent implements OnInit {
     this.api.getWorkItemsCount().subscribe((r) => (this.workItemsTotal = r.count));
   }
 
+  private buildWiFilterParams() {
+    return {
+      search: this.wiSearchText || undefined,
+      type: this.wiSelectedTypes.size > 0 ? [...this.wiSelectedTypes].join(',') : undefined,
+      state: this.wiSelectedStates.size > 0 ? [...this.wiSelectedStates].join(',') : undefined,
+      iteration_path: this.wiSelectedIteration || undefined,
+    };
+  }
+
   loadWorkItems(reset = false): void {
     if (reset) {
       this.workItemsSkip = 0;
       this.workItems = [];
     }
     this.workItemsLoading = true;
+    const params = this.buildWiFilterParams();
+    this.api.getWorkItemsCount(params).subscribe((r) => (this.workItemsTotal = r.count));
     this.api
-      .getWorkItems({
-        search: this.wiSearchText || undefined,
-        type: this.wiSelectedTypes.size > 0 ? [...this.wiSelectedTypes].join(',') : undefined,
-        skip: this.workItemsSkip,
-        limit: this.workItemsLimit,
-      })
+      .getWorkItems({ ...params, skip: this.workItemsSkip, limit: this.workItemsLimit })
       .subscribe({
         next: (items) => {
           this.workItems = reset ? items : [...this.workItems, ...items];
@@ -205,6 +225,19 @@ export class ParametresComponent implements OnInit {
     this.loadWorkItems(true);
   }
 
+  toggleStateFilter(state: string): void {
+    if (this.wiSelectedStates.has(state)) {
+      this.wiSelectedStates.delete(state);
+    } else {
+      this.wiSelectedStates.add(state);
+    }
+    this.loadWorkItems(true);
+  }
+
+  onIterationFilter(): void {
+    this.loadWorkItems(true);
+  }
+
   hasMoreWorkItems(): boolean {
     return this.workItemsSkip < this.workItemsTotal;
   }
@@ -213,7 +246,7 @@ export class ParametresComponent implements OnInit {
 
   updateProfile(member: TeamMember, profile: string): void {
     this.profileSaving[member.id] = true;
-    this.api.updateTeamMember(member.id, { profile: profile as 'Dev' | 'QA' | 'PSM' }).subscribe({
+    this.api.updateTeamMember(member.id, { profile: profile as 'Dev' | 'QA' | 'PSM' | 'Squad Lead' | 'Automate' }).subscribe({
       next: (updated) => {
         member.profile = updated.profile;
         this.profileSaving[member.id] = false;

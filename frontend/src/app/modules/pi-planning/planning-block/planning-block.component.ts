@@ -1,6 +1,5 @@
 import {
-  Component, Input, Output, EventEmitter, HostListener,
-  ElementRef, OnDestroy, ChangeDetectionStrategy,
+  Component, Input, Output, EventEmitter, OnDestroy, ChangeDetectionStrategy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { PlanningBlock, Leave, BLOCK_CATEGORY_LABELS, BlockCategory } from '../../../core/models';
@@ -34,6 +33,9 @@ export interface BlockResizeEvent {
       @if (isResizable) {
         <div class="resize-handle" (mousedown)="onResizeMouseDown($event)"></div>
       }
+      @if (isDeletable) {
+        <span class="delete-icon" (click)="onDeleteClick($event)" title="Supprimer">🗑️</span>
+      }
     </div>
   `,
   styleUrl: './planning-block.component.scss',
@@ -45,12 +47,13 @@ export class PlanningBlockComponent implements OnDestroy {
   @Input() isDraggable = false;
   @Input() isResizable = false;
   @Input() isLeave = false;
+  @Input() isDeletable = false;
 
   @Output() blockMoved = new EventEmitter<BlockMoveEvent>();
   @Output() blockResized = new EventEmitter<BlockResizeEvent>();
   @Output() blockClicked = new EventEmitter<PlanningBlock | Leave>();
+  @Output() blockDeleteRequested = new EventEmitter<PlanningBlock | Leave>();
 
-  // Drag state
   private dragging = false;
   private resizing = false;
   private startMouseX = 0;
@@ -59,24 +62,16 @@ export class PlanningBlockComponent implements OnDestroy {
   private mouseMoveHandler!: (e: MouseEvent) => void;
   private mouseUpHandler!: (e: MouseEvent) => void;
 
-  // Affichage en temps réel pendant le drag
   displayOffset: number | null = null;
   displayDuration: number | null = null;
 
-  constructor(private cal: CalendarService, private el: ElementRef) {}
+  constructor(private cal: CalendarService) {}
 
-  get b(): PlanningBlock { return this.block as PlanningBlock; }
-  get lv(): Leave { return this.block as Leave; }
-
-  get currentOffset(): number {
-    return this.displayOffset ?? this.block.day_offset;
-  }
-  get currentDuration(): number {
-    return this.displayDuration ?? this.block.duration_days;
-  }
+  get currentOffset(): number { return this.displayOffset ?? this.block.day_offset; }
+  get currentDuration(): number { return this.displayDuration ?? this.block.duration_days; }
 
   get left(): number { return this.cal.offsetToPixel(this.currentOffset, this.colWidth); }
-  get width(): number { return Math.max(this.colWidth * 0.5, this.currentDuration * this.colWidth - 2); }
+  get width(): number { return Math.max(4, this.currentDuration * this.colWidth - 2); }
 
   get blockClasses(): string {
     const cat = this.isLeave ? 'conges' : (this.block as PlanningBlock).category;
@@ -91,9 +86,15 @@ export class PlanningBlockComponent implements OnDestroy {
   }
 
   get tooltip(): string {
-    if (this.isLeave) return `Congé${this.lv.label ? ' — ' + this.lv.label : ''}`;
+    if (this.isLeave) return `Congé${(this.block as Leave).label ? ' — ' + (this.block as Leave).label : ''}`;
     const cat = (this.block as PlanningBlock).category as BlockCategory;
     return `${BLOCK_CATEGORY_LABELS[cat] ?? cat} (${this.block.duration_days}j)`;
+  }
+
+  onDeleteClick(e: MouseEvent): void {
+    e.stopPropagation();
+    e.preventDefault();
+    this.blockDeleteRequested.emit(this.block);
   }
 
   onClick(e: MouseEvent): void {
@@ -164,7 +165,5 @@ export class PlanningBlockComponent implements OnDestroy {
     document.removeEventListener('mouseup', this.mouseUpHandler);
   }
 
-  ngOnDestroy(): void {
-    this.cleanup();
-  }
+  ngOnDestroy(): void { this.cleanup(); }
 }

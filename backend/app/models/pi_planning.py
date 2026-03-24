@@ -39,9 +39,14 @@ class PlanningBlock(Base):
     layer: Mapped[int] = mapped_column(Integer, default=1)
     # Bloc généré automatiquement vs posé manuellement
     is_auto_generated: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Verrou : si True, le bloc ne peut pas être supprimé (même via reset)
+    is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Lien optionnel vers un work item AZDO (pour les stories)
     work_item_id: Mapped[int | None] = mapped_column(ForeignKey("work_items.id"))
+
+    # Groupe de briques (pour les stories splittées sur plusieurs écarts/sprints)
+    group_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     pi: Mapped["PI"] = relationship(back_populates="planning_blocks")
     team_member: Mapped["TeamMember"] = relationship(back_populates="planning_blocks")

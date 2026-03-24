@@ -22,21 +22,22 @@ DEV_MATRIX_DEFAULT: dict[int, dict[str, float]] = {
     0: {},
 }
 
+# Matrices Klaxoon — colonne "Stories" exclue (laissée libre pour les story blocks layer 2)
 QA_MATRIX_DEFAULT: dict[int, dict[str, float]] = {
-    5: {"agility": 0.5, "reunions": 0.5, "bugs_maintenance": 1.0, "imprevus": 0.25, "montee_competence": 0.25},
-    4: {"agility": 0.5, "reunions": 0.5, "bugs_maintenance": 0.75, "imprevus": 0.0, "montee_competence": 0.0},
-    3: {"agility": 0.5, "reunions": 0.25, "bugs_maintenance": 0.5, "imprevus": 0.0, "montee_competence": 0.0},
-    2: {"agility": 0.25, "reunions": 0.25, "bugs_maintenance": 0.25, "imprevus": 0.0, "montee_competence": 0.0},
-    1: {"agility": 0.25, "reunions": 0.0,  "bugs_maintenance": 0.0, "imprevus": 0.0, "montee_competence": 0.0},
+    5: {"agility": 0.50, "reunions": 0.50, "bugs_maintenance": 0.75, "imprevus": 1.25, "montee_competence": 0.50},
+    4: {"agility": 0.25, "reunions": 0.25, "bugs_maintenance": 0.50, "imprevus": 1.00, "montee_competence": 0.50},
+    3: {"agility": 0.25, "reunions": 0.25, "bugs_maintenance": 0.50, "imprevus": 0.75, "montee_competence": 0.25},
+    2: {"agility": 0.25, "reunions": 0.25, "bugs_maintenance": 0.25, "imprevus": 0.50, "montee_competence": 0.25},
+    1: {"agility": 0.00, "reunions": 0.00, "bugs_maintenance": 0.00, "imprevus": 0.25, "montee_competence": 0.25},
     0: {},
 }
 
 PSM_MATRIX_DEFAULT: dict[int, dict[str, float]] = {
-    5: {"agility": 1.0, "reunions": 1.5, "psm": 2.5},
-    4: {"agility": 1.0, "reunions": 1.0, "psm": 2.0},
-    3: {"agility": 0.5, "reunions": 1.0, "psm": 1.5},
-    2: {"agility": 0.5, "reunions": 0.5, "psm": 1.0},
-    1: {"agility": 0.25, "reunions": 0.25, "psm": 0.5},
+    5: {"psm": 1.75, "reunions": 0.75, "agility": 0.50, "bugs_maintenance": 0.25, "montee_competence": 0.50, "imprevus": 0.50},
+    4: {"psm": 1.50, "reunions": 0.50, "agility": 0.25, "bugs_maintenance": 0.25, "montee_competence": 0.50, "imprevus": 0.50},
+    3: {"psm": 1.00, "reunions": 0.50, "agility": 0.25, "bugs_maintenance": 0.25, "montee_competence": 0.25, "imprevus": 0.25},
+    2: {"psm": 0.75, "reunions": 0.25, "agility": 0.25, "bugs_maintenance": 0.00, "montee_competence": 0.25, "imprevus": 0.25},
+    1: {"psm": 0.75, "reunions": 0.00, "agility": 0.00, "bugs_maintenance": 0.00, "montee_competence": 0.25, "imprevus": 0.00},
     0: {},
 }
 
@@ -84,6 +85,7 @@ def generate_pi_planning(pi_id: int, db: Session) -> None:
     if not sprints:
         raise ValueError(f"Aucune itération trouvée pour le PI {pi_id}. Créez d'abord les sprints.")
 
+    PROFILES_NO_PLANNING = {"Squad Lead", "Automate"}
     members = db.query(TeamMember).filter(TeamMember.is_active == True).all()
 
     for sprint in sprints:
@@ -92,6 +94,8 @@ def generate_pi_planning(pi_id: int, db: Session) -> None:
         total_working_days = n_weeks * 5
 
         for member in members:
+            if member.profile in PROFILES_NO_PLANNING:
+                continue
             matrix = _get_matrix(member.profile, db)
 
             # Congés de ce membre sur ce sprint
@@ -109,35 +113,43 @@ def generate_pi_planning(pi_id: int, db: Session) -> None:
                     leave_half_days.add(round(off * 2) / 2)
                     off += 0.5
 
-            # Calcul de la capacité totale disponible par semaine
+            # Segments calendaires lundi-vendredi.
+            # Le sprint commence un vendredi (offset 0), donc :
+            #   segment 0 : vendredi seul      → [0, 1)
+            #   segment 1 : lundi-vendredi     → [1, 6)
+            #   segment 2 : lundi-vendredi     → [6, 11)  ...
+            segments: list[tuple[float, float]] = [(0.0, 1.0)]
+            seg_start = 1.0
+            while seg_start < total_working_days:
+                segments.append((seg_start, min(seg_start + 5.0, float(total_working_days))))
+                seg_start += 5.0
+
             total_fixed = 0.0
             blocks_data: list[dict] = []
-            cursor = 0.0  # day_offset courant dans le sprint
 
-            for week in range(n_weeks):
-                week_start = week * 5.0
-                week_end = week_start + 5.0
+            for seg_start, seg_end in segments:
+                seg_size = seg_end - seg_start  # nb nominal de jours dans ce segment
 
-                # Jours de congé dans cette semaine
-                leaves_this_week = sum(
+                # Congés dans ce segment
+                leaves_this_seg = sum(
                     1 for h in leave_half_days
-                    if week_start <= h < week_end
+                    if seg_start <= h < seg_end
                 ) * 0.5
-                available_days = 5 - int(leaves_this_week * 2) * 0.5  # arrondi demi-journée
+                available_days = seg_size - leaves_this_seg
 
                 n_available = max(0, min(5, int(round(available_days))))
                 week_matrix = matrix.get(n_available, {})
 
-                cursor = week_start
+                cursor = seg_start
                 for cat in CATEGORY_ORDER:
                     duration = week_matrix.get(cat, 0.0)
                     if duration <= 0:
                         continue
                     # Avancer le curseur en sautant les congés
-                    while round(cursor * 2) / 2 in leave_half_days and cursor < week_end:
+                    while round(cursor * 2) / 2 in leave_half_days and cursor < seg_end:
                         cursor += 0.5
 
-                    if cursor >= week_end:
+                    if cursor >= seg_end:
                         break
 
                     blocks_data.append({
@@ -153,26 +165,6 @@ def generate_pi_planning(pi_id: int, db: Session) -> None:
                     })
                     cursor += duration
                     total_fixed += duration
-
-            # Bloc stories (layer 2) — capacité restante
-            total_leaves = len(leave_half_days) * 0.5
-            stories_days = round(max(0.0, total_working_days - total_leaves - total_fixed), 2)
-
-            stories_cat = "stories_dev" if member.profile == "Dev" else (
-                "stories_qa" if member.profile == "QA" else None
-            )
-            if stories_cat and stories_days > 0:
-                blocks_data.append({
-                    "pi_id": pi_id,
-                    "team_member_id": member.id,
-                    "sprint_number": sprint_num,
-                    "day_offset": 0.0,
-                    "duration_days": stories_days,
-                    "category": stories_cat,
-                    "layer": 2,
-                    "is_auto_generated": True,
-                    "start_date": sprint.start_date,
-                })
 
             for data in blocks_data:
                 db.add(PlanningBlock(**data))

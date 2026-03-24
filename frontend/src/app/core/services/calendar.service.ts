@@ -97,4 +97,17 @@ export class CalendarService {
     const idx = Math.floor(offset);
     return workingDays[idx] ?? null;
   }
+
+  /** Convertit une date calendaire en day_offset dans le sprint. Retourne -1 si hors sprint. */
+  dateToOffset(date: Date, workingDays: Date[]): number {
+    const iso = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+    return workingDays.findIndex((d) => {
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` === iso;
+    });
+  }
+
+  /** Retourne la date ISO (YYYY-MM-DD) d'un jour ouvré du sprint. */
+  workingDayToISO(d: Date): string {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
 }

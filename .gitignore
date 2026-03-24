@@ -28,3 +28,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Deploy artifacts
+deploy.zip
+backend/static/

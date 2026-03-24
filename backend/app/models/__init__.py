@@ -8,6 +8,8 @@ from app.models.leave import Leave
 from app.models.pbr import PBRSession, PBRVote
 from app.models.app_settings import AppSettings
 from app.models.sync_log import SyncLog
+from app.models.llm_log import LLMLog
+from app.models.sprint_capacity import SprintCapacity
 
 __all__ = [
     "Base",
@@ -21,4 +23,6 @@ __all__ = [
     "PBRVote",
     "AppSettings",
     "SyncLog",
+    "LLMLog",
+    "SprintCapacity",
 ]

@@ -45,10 +45,26 @@ class AzdoSyncService:
                 "details": None,
             }
 
-    async def sync_all(self) -> dict:
+    def _last_successful_sync_date(self) -> datetime | None:
+        """Retourne la date de la dernière synchro réussie, ou None si aucune."""
+        log = (
+            self.db.query(SyncLog)
+            .filter(SyncLog.status == "success")
+            .order_by(SyncLog.synced_at.desc())
+            .first()
+        )
+        return log.synced_at if log else None
+
+    async def sync_all(self, full_sync: bool = False, since_date: datetime | None = None) -> dict:
         client = self._build_client()
         team = self._get_setting("azdo_team") or ""
         counts = {"iterations": 0, "members": 0, "work_items": 0}
+
+        # Détermine la date de filtrage
+        if full_sync:
+            since_date = None  # Pas de filtre
+        elif since_date is None:
+            since_date = self._last_successful_sync_date()  # Auto-détection
 
         try:
             # Synchronisation des itérations
@@ -84,10 +100,16 @@ class AzdoSyncService:
                 self.db.commit()
 
             # Synchronisation des work items
+            date_filter = ""
+            if since_date:
+                since_str = since_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+                date_filter = f"AND [System.ChangedDate] >= '{since_str}' "
+
             query = (
                 "SELECT [System.Id] FROM WorkItems "
                 "WHERE [System.TeamProject] = @project "
-                "AND [System.WorkItemType] IN ('User Story', 'Bug', 'Task', 'Feature', 'Enabler Story') "
+                "AND [System.WorkItemType] IN ('User Story', 'Bug', 'Task', 'Feature', 'Enabler Story', 'Enabler', 'Question', 'Maintenance') "
+                f"{date_filter}"
                 "ORDER BY [System.Id]"
             )
             ids = await client.run_wiql(query)
@@ -113,15 +135,21 @@ class AzdoSyncService:
                 existing.completed_work = fields.get("Microsoft.VSTS.Scheduling.CompletedWork")
                 existing.remaining_work = fields.get("Microsoft.VSTS.Scheduling.RemainingWork")
                 existing.parent_id = fields.get("System.Parent")
+                existing.business_value = fields.get("Microsoft.VSTS.Common.BusinessValue")
+                existing.effort = fields.get("Microsoft.VSTS.Scheduling.Effort")
                 existing.synced_at = datetime.utcnow()
                 counts["work_items"] += 1
 
             self.db.commit()
 
             total = sum(counts.values())
+            details = dict(counts)
+            details["mode"] = "full" if full_sync else "incremental"
+            if since_date:
+                details["since"] = since_date.isoformat()
             log = SyncLog(
                 status="success",
-                details=json.dumps(counts, ensure_ascii=False),
+                details=json.dumps(details, ensure_ascii=False),
                 items_synced=total,
             )
             self.db.add(log)

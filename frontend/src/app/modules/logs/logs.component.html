@@ -1,0 +1,82 @@
+<div class="logs-page">
+
+  <div class="logs-toolbar">
+    <h1 class="page-title">Logs</h1>
+    <div class="toolbar-actions">
+      <select class="filter-select" [(ngModel)]="filterType" (change)="load()">
+        <option value="">Tous les types</option>
+        @for (t of LOG_TYPES.slice(1); track t) {
+          <option [value]="t">{{ typeLabel(t) }}</option>
+        }
+      </select>
+      <select class="filter-select" [(ngModel)]="limit" (change)="load()">
+        <option [value]="50">50 derniers</option>
+        <option [value]="100">100 derniers</option>
+        <option [value]="200">200 derniers</option>
+        <option [value]="500">500 derniers</option>
+      </select>
+      <button class="btn btn-secondary" (click)="load()" [disabled]="loading">
+        ↻ Rafraîchir
+      </button>
+      <button class="btn btn-danger" (click)="clearAll()" [disabled]="loading || logs.length === 0">
+        Vider les logs
+      </button>
+    </div>
+  </div>
+
+  @if (error) {
+    <div class="error-msg">{{ error }}</div>
+  }
+
+  @if (loading) {
+    <div class="loading">Chargement…</div>
+  } @else if (logs.length === 0) {
+    <div class="empty-state">Aucun log. Déclenchez une analyse IA dans l'écran PBR pour voir les données transmises au LLM.</div>
+  } @else {
+    <div class="logs-layout">
+
+      <!-- Liste des logs -->
+      <div class="logs-list">
+        @for (log of logs; track log.id) {
+          <div
+            class="log-row"
+            [class.log-row--selected]="selectedLog?.id === log.id"
+            (click)="select(log)"
+          >
+            <div class="log-row-header">
+              <span class="badge" [ngClass]="typeClass(log.log_type)">{{ typeLabel(log.log_type) }}</span>
+              @if (log.duration_ms !== null) {
+                <span class="duration">{{ log.duration_ms }}ms</span>
+              }
+              <span class="log-date">{{ formatDate(log.created_at) }}</span>
+            </div>
+            <div class="log-summary">{{ log.summary }}</div>
+            @if (log.work_item_id) {
+              <div class="log-meta">WI#{{ log.work_item_id }}
+                @if (log.session_id) { &nbsp;· Session #{{ log.session_id }} }
+              </div>
+            }
+          </div>
+        }
+      </div>
+
+      <!-- Panneau détail -->
+      @if (selectedLog) {
+        <div class="log-detail">
+          <div class="log-detail-header">
+            <span class="badge" [ngClass]="typeClass(selectedLog.log_type)">{{ typeLabel(selectedLog.log_type) }}</span>
+            <span class="log-date">{{ formatDate(selectedLog.created_at) }}</span>
+            @if (selectedLog.duration_ms !== null) {
+              <span class="duration">{{ selectedLog.duration_ms }}ms</span>
+            }
+            <button class="close-btn" (click)="selectedLog = null">✕</button>
+          </div>
+          <div class="log-detail-summary">{{ selectedLog.summary }}</div>
+          <pre class="log-content">{{ formatJson(selectedLog.content) }}</pre>
+        </div>
+      }
+
+    </div>
+  }
+
+</div>

@@ -79,9 +79,21 @@
       <section class="data-section">
         <div class="section-header">
           <h2 class="section-title">Synchronisation Azure DevOps</h2>
-          <button class="btn btn-primary" (click)="triggerSync()" [disabled]="syncLoading">
-            {{ syncLoading ? '⏳ Synchronisation…' : '🔄 Synchroniser maintenant' }}
-          </button>
+          <div class="sync-actions">
+            <div class="sync-date-wrap">
+              <label class="sync-date-label">Depuis le</label>
+              <input class="sync-date-input" type="date" [(ngModel)]="syncSinceDate"
+                     title="Laisser vide pour utiliser la date de la dernière synchro réussie" />
+            </div>
+            <button class="btn btn-primary" (click)="triggerSync(false)" [disabled]="syncLoading"
+                    title="Synchronise les items modifiés depuis la date choisie (ou depuis la dernière synchro réussie si vide)">
+              {{ syncLoading ? '⏳ Synchronisation…' : '🔄 Synchro incrémentale' }}
+            </button>
+            <button class="btn btn-secondary" (click)="triggerSync(true)" [disabled]="syncLoading"
+                    title="Synchronise tous les items sans filtre de date (peut dépasser la limite AZDO)">
+              🔄 Synchro complète
+            </button>
+          </div>
         </div>
 
         @if (syncLogs.length > 0) {
@@ -90,6 +102,7 @@
               <tr>
                 <th>Date</th>
                 <th>Statut</th>
+                <th>Mode</th>
                 <th>Détails</th>
                 <th>Total</th>
               </tr>
@@ -103,6 +116,7 @@
                       {{ log.status === 'success' ? '✓ Succès' : '✗ Erreur' }}
                     </span>
                   </td>
+                  <td><span class="mode-badge">{{ parseSyncMode(log.details) }}</span></td>
                   <td class="col-details">{{ parseSyncDetails(log.details) }}</td>
                   <td>{{ log.items_synced }}</td>
                 </tr>
@@ -140,6 +154,21 @@
               </button>
             }
           </div>
+          <div class="filter-chips">
+            @for (state of workItemStates; track state) {
+              <button
+                class="chip chip--state"
+                [class.chip--active]="wiSelectedStates.has(state)"
+                (click)="toggleStateFilter(state)"
+              >{{ state }}</button>
+            }
+          </div>
+          <select class="iteration-filter" [(ngModel)]="wiSelectedIteration" (change)="onIterationFilter()">
+            <option value="">Toutes les itérations</option>
+            @for (it of iterations; track it.id) {
+              <option [value]="it.name">{{ it.name }}</option>
+            }
+          </select>
         </div>
 
         @if (workItemsLoading && workItems.length === 0) {
@@ -252,6 +281,8 @@
                       <option value="Dev">Dev</option>
                       <option value="QA">QA</option>
                       <option value="PSM">PSM</option>
+                      <option value="Squad Lead">Squad Lead</option>
+                      <option value="Automate">Automate</option>
                     </select>
                   </td>
                 </tr>

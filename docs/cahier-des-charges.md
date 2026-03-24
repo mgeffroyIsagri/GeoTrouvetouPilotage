@@ -164,12 +164,17 @@ Tables principales :
 
 ## 7. Module 3 — PBR / Refinement
 
-### 7.1 Gestion des sujets
+### 7.1 Gestion des sessions
+- Chaque session PBR est **liée à un PI** (relation obligatoire avec la table `pi`)
+- Le **PO/PSM** crée une session en sélectionnant le PI cible et en lui donnant un nom (ex : "PBR Sprint 2 — Mai 2025")
+- **Une seule session PBR active à la fois** (toutes sessions confondues)
+- La liste des sessions est filtrable par PI
+
+### 7.2 Gestion des sujets
 - Le **PO/PSM** saisit manuellement les **IDs AZDO** des sujets à raffiner (Enablers / Features)
 - L'appli récupère depuis AZDO (ou la BDD locale synchronisée) : titre, description, critères d'acceptation, stories enfants, hypothèses de bénéfices, risques
-- **Une seule session PBR active à la fois**
 
-### 7.2 Déroulement d'une session PBR
+### 7.3 Déroulement d'une session PBR
 Pour chaque sujet, chaque participant peut saisir :
 
 | Information | Détail |
@@ -183,14 +188,14 @@ Pour chaque sujet, chaque participant peut saisir :
 En fin de session, pour chaque sujet **non DOR** :
 - Saisie d'un **plan d'action** pour la prochaine séance
 
-### 7.3 Analyse IA
+### 7.4 Analyse IA
 - Déclenchée par le PO/PSM sur un sujet donné
 - Analyse le contenu du work item (description, critères d'acceptation, stories, notes PBR) et produit :
   - Une **note DOR automatique** (1 à 5)
   - Un **commentaire détaillé** justifiant la note
 - Le LLM utilisé est **configurable** (provider, modèle, clé API) dans les paramètres de l'application
 
-### 7.4 Historique PBR
+### 7.5 Historique PBR
 - Toutes les sessions PBR sont archivées par sujet
 - Consultables dans une vue dédiée : évolution de la note DOR au fil des séances
 

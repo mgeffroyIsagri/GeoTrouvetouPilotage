@@ -1,46 +1,412 @@
 <div class="pbr">
-  <header class="pbr__header">
+
+  <!-- ── Toolbar ─────────────────────────────────────────── -->
+  <div class="pbr-toolbar">
     <h1 class="page-title">PBR / Refinement</h1>
-  </header>
-
-  @if (activeSession) {
-    <div class="session-info">
-      <span class="session-badge active">Session active : {{ activeSession.name }}</span>
-    </div>
-
-    @if (votes.length === 0) {
-      <p class="empty-state">Aucun vote pour cette session.</p>
-    }
-
-    <table class="votes-table">
-      <thead>
-        <tr>
-          <th>Work Item</th>
-          <th>Note DOR</th>
-          <th>Story Points</th>
-          <th>Charge Dev (j)</th>
-          <th>Charge QA (j)</th>
-          <th>Commentaire</th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (vote of votes; track vote.id) {
-          <tr>
-            <td>#{{ vote.work_item_id }}</td>
-            <td>
-              <span class="dor-badge dor-{{ vote.dor_note }}">{{ vote.dor_note ?? '-' }}</span>
-            </td>
-            <td>{{ vote.story_points ?? '-' }}</td>
-            <td>{{ vote.charge_dev_days ?? '-' }}</td>
-            <td>{{ vote.charge_qa_days ?? '-' }}</td>
-            <td>{{ vote.comment ?? '-' }}</td>
-          </tr>
+    <div class="toolbar-right">
+      <select class="pi-filter" [(ngModel)]="filterPiId">
+        <option [ngValue]="null">Tous les PI</option>
+        @for (pi of piList; track pi.id) {
+          <option [ngValue]="pi.id">{{ pi.name }}</option>
         }
-      </tbody>
-    </table>
-  } @else {
-    <div class="empty-state">
-      Aucune session PBR active.
+      </select>
+      <button class="btn btn-primary" (click)="openCreateForm()">+ Nouvelle session</button>
+    </div>
+  </div>
+
+  <!-- ── Formulaire copie ────────────────────────────────── -->
+  @if (showCopyForm && copySourceSession) {
+    <div class="create-form-card">
+      <div class="create-form-title">Copier la session « {{ copySourceSession.name }} »</div>
+      @if (copyError) { <div class="form-error">{{ copyError }}</div> }
+      <div class="create-form-row">
+        <label>Nom de la nouvelle session</label>
+        <input class="form-input" [(ngModel)]="copySession.name" placeholder="Nom de la session" />
+      </div>
+      <div class="create-form-row">
+        <label>PI lié</label>
+        <select class="form-input" [(ngModel)]="copySession.pi_id">
+          <option [ngValue]="null">— Sans PI —</option>
+          @for (pi of piList; track pi.id) {
+            <option [ngValue]="pi.id">{{ pi.name }}</option>
+          }
+        </select>
+      </div>
+      <div class="create-form-row">
+        <label>Date / Heure</label>
+        <input class="form-input" type="datetime-local" [(ngModel)]="copySession.date" />
+      </div>
+      <div class="create-form-actions">
+        <button class="btn btn-primary" (click)="submitCopySession()">Créer la copie</button>
+        <button class="btn btn-secondary" (click)="showCopyForm = false">Annuler</button>
+      </div>
     </div>
   }
+
+  <!-- ── Formulaire création ─────────────────────────────── -->
+  @if (showCreateForm) {
+    <div class="create-form-card">
+      <div class="create-form-title">Nouvelle session PBR</div>
+      @if (createError) { <div class="form-error">{{ createError }}</div> }
+      <div class="create-form-row">
+        <label>Nom de la session</label>
+        <input class="form-input" [(ngModel)]="newSession.name" placeholder="Ex : PBR Sprint 2 — Mai 2025" />
+      </div>
+      <div class="create-form-row">
+        <label>PI lié</label>
+        <select class="form-input" [(ngModel)]="newSession.pi_id">
+          <option [ngValue]="null">— Sans PI —</option>
+          @for (pi of piList; track pi.id) {
+            <option [ngValue]="pi.id">{{ pi.name }}</option>
+          }
+        </select>
+      </div>
+      <div class="create-form-row">
+        <label>Date / Heure</label>
+        <input class="form-input" type="datetime-local" [(ngModel)]="newSession.date" />
+      </div>
+      <div class="create-form-actions">
+        <button class="btn btn-primary" (click)="submitCreateSession()">Créer</button>
+        <button class="btn btn-secondary" (click)="showCreateForm = false">Annuler</button>
+      </div>
+    </div>
+  }
+
+  <!-- ── Corps principal ────────────────────────────────── -->
+  <div class="pbr-body">
+
+    <!-- Sidebar sessions -->
+    <aside class="sidebar">
+      @if (filteredSessions.length === 0) {
+        <div class="sidebar-empty">Aucune session</div>
+      }
+      @for (s of filteredSessions; track s.id) {
+        <div class="session-item"
+             [class.session-item--active]="selectedSession?.id === s.id"
+             (click)="selectSession(s)">
+          <div class="session-item-top">
+            <span class="session-name">{{ s.name }}</span>
+            @if (s.is_active) { <span class="badge-active">En cours</span> }
+          </div>
+          <div class="session-item-meta">
+            <span class="session-pi">{{ piName(s.pi_id) }}</span>
+            <span class="session-date">{{ s.date | date:'dd/MM/yy HH:mm' }}</span>
+          </div>
+          @if (selectedSession?.id === s.id && sessionStats; as stats) {
+            <div class="session-stats">
+              <span class="stat-pill stat-pill--blue" title="Sujets total (parents + stories)">
+                📦 {{ stats.total }} <span class="stat-sub">{{ stats.parents }}F · {{ stats.stories }}S</span>
+              </span>
+              <span class="stat-pill"
+                    [class.stat-pill--green]="stats.dorTotal > 0 && stats.dorOk === stats.dorTotal"
+                    [class.stat-pill--orange]="stats.dorTotal > 0 && stats.dorOk < stats.dorTotal"
+                    [class.stat-pill--gray]="stats.dorTotal === 0"
+                    title="Stories DOR validées (tous votes = Oui)">
+                ✅ {{ stats.dorOk }}/{{ stats.stories }}
+              </span>
+              <span class="stat-pill"
+                    [class.stat-pill--purple]="stats.analyzed === stats.total"
+                    [class.stat-pill--indigo]="stats.analyzed > 0 && stats.analyzed < stats.total"
+                    [class.stat-pill--gray]="stats.analyzed === 0"
+                    title="Items analysés par l'IA">
+                🤖 {{ stats.analyzed }}/{{ stats.total }}
+              </span>
+              <span class="stat-pill"
+                    [class.stat-pill--teal]="stats.ownersAssigned === stats.ownersTotal && stats.ownersTotal > 0"
+                    [class.stat-pill--orange]="stats.ownersAssigned < stats.ownersTotal"
+                    [class.stat-pill--gray]="stats.ownersTotal === 0"
+                    title="Parents avec responsable assigné">
+                👤 {{ stats.ownersAssigned }}/{{ stats.ownersTotal }}
+              </span>
+              @if (stats.deprio > 0) {
+                <span class="stat-pill stat-pill--red" title="Items déprioritisés">
+                  ⏸ {{ stats.deprio }}
+                </span>
+              }
+            </div>
+          }
+          <div class="session-item-actions">
+            <button class="action-btn"
+                    [title]="s.is_active ? 'Clôturer la session' : 'Activer la session'"
+                    (click)="activateSession(s, $event)">
+              {{ s.is_active ? '⏹' : '▶' }}
+            </button>
+            <button class="action-btn" title="Copier cette session" (click)="openCopyForm(s, $event)">📋</button>
+            <button class="action-btn action-btn--danger"
+                    title="Supprimer la session"
+                    (click)="deleteSession(s, $event)">🗑</button>
+          </div>
+        </div>
+      }
+    </aside>
+
+    <!-- Zone principale -->
+    <main class="pbr-main">
+
+      @if (!selectedSession) {
+        <div class="empty-state">
+          Sélectionnez ou créez une session PBR pour commencer.
+        </div>
+      } @else {
+
+        <!-- En-tête session -->
+        <div class="session-header">
+          <div class="session-header-left">
+            <h2 class="session-title">{{ selectedSession.name }}</h2>
+            <span class="session-header-meta">
+              {{ piName(selectedSession.pi_id) }} &bull; {{ selectedSession.date | date:'dd MMMM yyyy, HH:mm' }}
+            </span>
+          </div>
+          @if (selectedSession.is_active) {
+            <span class="badge-active-lg">Session en cours</span>
+          }
+        </div>
+
+        <!-- Participants actifs de la session -->
+        <div class="participants-bar">
+          <span class="participants-label">Participants :</span>
+          @for (m of dorMembers; track m.id) {
+            <button class="participant-chip"
+                    [class.participant-chip--excluded]="isMemberExcluded(m.id)"
+                    [title]="isMemberExcluded(m.id) ? 'Cliquer pour réintégrer' : 'Cliquer pour exclure (absent…)'"
+                    (click)="toggleMemberExclusion(m)">
+              {{ m.display_name }}
+              <span class="participant-profile">{{ m.profile }}</span>
+              @if (isMemberExcluded(m.id)) { <span class="participant-excluded-icon">✕</span> }
+            </button>
+          }
+        </div>
+
+        <!-- Ajout d'un sujet -->
+        <div class="add-item-bar">
+          <span class="add-item-label">Ajouter un sujet (ID AZDO) :</span>
+          <input class="add-item-input"
+                 type="number"
+                 [(ngModel)]="addingItemId"
+                 placeholder="Ex : 12345"
+                 (keydown.enter)="addItem()" />
+          <button class="btn btn-secondary" (click)="addItem()">Ajouter</button>
+          @if (addItemError) { <span class="add-item-error">{{ addItemError }}</span> }
+        </div>
+
+        <!-- Liste des sujets -->
+        @if (items.length === 0) {
+          <div class="empty-state">Aucun sujet dans cette session. Ajoutez un ID AZDO ci-dessus.</div>
+        }
+
+        @for (entry of groupedItems; track entry.item.id; let idx = $index) {
+          <div class="subject-card"
+               [class.subject-card--child]="entry.depth === 1"
+               [class.subject-card--child-last]="isLastChildOfParent(idx)"
+               [class.subject-card--deprioritized]="entry.item.is_deprioritized || (entry.depth === 1 && isDeprioritized(entry.item.work_item_id))">
+
+            <!-- En-tête sujet -->
+            <div class="subject-header" (click)="toggleItem(entry.item)">
+              <div class="subject-header-left">
+                <span class="expand-icon">{{ expandedItems.has(entry.item.id) ? '▾' : '▸' }}</span>
+                @if (getWorkItem(entry.item.work_item_id); as wi) {
+                  <span class="wi-type-chip wi-type--{{ wi.type | lowercase }}">{{ wi.type }}</span>
+                  @if (azdoUrl(entry.item.work_item_id); as url) {
+                    <a class="wi-title wi-link" [href]="url" target="_blank" rel="noopener" (click)="$event.stopPropagation()">{{ wi.title }}</a>
+                  } @else {
+                    <span class="wi-title">{{ wi.title }}</span>
+                  }
+                  @if (wi.story_points) {
+                    <span class="wi-sp">{{ wi.story_points }} SP</span>
+                  }
+                } @else {
+                  <span class="wi-title">Work item #{{ entry.item.work_item_id }}</span>
+                }
+              </div>
+              <div class="subject-header-right" (click)="$event.stopPropagation()">
+                @if (entry.item.is_deprioritized) {
+                  <span class="badge-deprioritized">Non priorisé</span>
+                }
+                @if (!isParentType(entry.item.work_item_id)) {
+                  @let stats = dorStats(entry.item.work_item_id);
+                  @if (stats != null) {
+                    @if (stats.no === 0) {
+                      <span class="dor-badge dor-yes">DOR ✔ {{ stats.yes }}/{{ stats.total }}</span>
+                    } @else if (stats.yes === 0) {
+                      <span class="dor-badge dor-no">DOR ✘ 0/{{ stats.total }}</span>
+                    } @else {
+                      <span class="dor-badge dor-partial">DOR {{ stats.yes }}/{{ stats.total }}</span>
+                    }
+                  }
+                }
+                @if (entry.item.ia_dor_note != null) {
+                  <span class="dor-badge dor-ia dor-{{ entry.item.ia_dor_note }}" [title]="entry.item.ia_comment ?? ''">IA {{ entry.item.ia_dor_note }}</span>
+                }
+                @if (entry.depth === 0) {
+                  <button class="btn btn-secondary btn-sm"
+                          [disabled]="syncingItemId === entry.item.id"
+                          title="Synchroniser les stories enfants depuis AZDO"
+                          (click)="syncItem(entry.item, $event)">
+                    {{ syncingItemId === entry.item.id ? '⏳' : '🔄' }}
+                  </button>
+                }
+                <button class="btn btn-secondary btn-sm"
+                        [disabled]="analyzingItemId === entry.item.id"
+                        (click)="analyzeItem(entry.item)">
+                  {{ analyzingItemId === entry.item.id ? '⏳ Analyse…' : '🤖 Analyser' }}
+                </button>
+                <button class="action-btn action-btn--danger" (click)="removeItem(entry.item)">🗑</button>
+              </div>
+            </div>
+
+            @if (expandedItems.has(entry.item.id)) {
+
+              <!-- Détail work item -->
+              @if (getWorkItem(entry.item.work_item_id); as wi) {
+                <div class="wi-detail">
+                  @if (wi.description) {
+                    <div class="wi-section">
+                      <div class="wi-section-title">Description</div>
+                      <div class="wi-section-body" [innerHTML]="wi.description"></div>
+                    </div>
+                  }
+                  @if (wi.acceptance_criteria) {
+                    <div class="wi-section">
+                      <div class="wi-section-title">Critères d'acceptation</div>
+                      <div class="wi-section-body" [innerHTML]="wi.acceptance_criteria"></div>
+                    </div>
+                  }
+                  <div class="wi-meta-row">
+                    @if (wi.state) { <span class="wi-meta-chip">État : {{ wi.state }}</span> }
+                    @if (wi.assigned_to) { <span class="wi-meta-chip">Assigné : {{ wi.assigned_to }}</span> }
+                    @if (wi.iteration_path) { <span class="wi-meta-chip">Iteration : {{ wi.iteration_path }}</span> }
+                  </div>
+                </div>
+              }
+
+              <!-- Responsable refinement + déprioritisation (parents uniquement) -->
+              @if (entry.depth === 0) {
+                <div class="item-meta-bar">
+                  <div class="item-meta-group">
+                    <label class="item-meta-label">Responsable refinement</label>
+                    <select class="item-meta-select"
+                            [ngModel]="entry.item.refinement_owner_id"
+                            (ngModelChange)="saveRefinementOwner(entry.item, $event)">
+                      <option [ngValue]="null">— Non assigné —</option>
+                      @for (m of refinementMembers; track m.id) {
+                        <option [ngValue]="m.id">{{ m.display_name }} ({{ m.profile }})</option>
+                      }
+                    </select>
+                  </div>
+                  <div class="item-meta-group">
+                    <label class="item-meta-label">Priorité</label>
+                    <button class="btn btn-sm"
+                            [class.btn-deprio]="entry.item.is_deprioritized"
+                            [class.btn-secondary]="!entry.item.is_deprioritized"
+                            (click)="toggleDeprioritized(entry.item, $event)">
+                      {{ entry.item.is_deprioritized ? '🚫 Non priorisé' : '✅ Priorisé' }}
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Plan d'action parent -->
+                <div class="action-plan-section action-plan-section--parent">
+                  <div class="action-plan-title">Plan d'action pour le prochain PBR</div>
+                  <textarea class="action-plan-input"
+                            rows="3"
+                            placeholder="Actions à mener avant la prochaine séance…"
+                            [ngModel]="getActionPlan(entry.item)"
+                            (ngModelChange)="actionPlanMap.set(entry.item.id, $event)">
+                  </textarea>
+                  <button class="btn btn-primary btn-sm" (click)="saveActionPlan(entry.item)">Sauvegarder le plan</button>
+                </div>
+              }
+
+              <!-- Table des votes (stories uniquement) -->
+              @if (!isParentType(entry.item.work_item_id)) {
+              <div class="votes-section">
+                <div class="votes-title">Votes des participants</div>
+                <table class="votes-table">
+                  <thead>
+                    <tr>
+                      <th>Participant</th>
+                      <th>DOR</th>
+                      <th>Story Points</th>
+                      <th>Charge Dev (j)</th>
+                      <th>Charge QA (j)</th>
+                      <th>Commentaire</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (member of sessionMembers; track member.id; let i = $index) {
+                      <tr [class.vote-row--filled]="getVote(entry.item.work_item_id, member.id) !== null">
+                        <td class="member-cell">
+                          {{ member.display_name }}
+                          <span class="member-profile-badge">{{ member.profile }}</span>
+                        </td>
+                        <td>
+                          <div class="dor-toggle">
+                            <button class="dor-btn"
+                                    [class.dor-btn--yes]="getEdit(entry.item.work_item_id, member.id).dor_compliant === true"
+                                    (click)="getEdit(entry.item.work_item_id, member.id).dor_compliant = getEdit(entry.item.work_item_id, member.id).dor_compliant === true ? null : true">
+                              Oui
+                            </button>
+                            <button class="dor-btn"
+                                    [class.dor-btn--no]="getEdit(entry.item.work_item_id, member.id).dor_compliant === false"
+                                    (click)="getEdit(entry.item.work_item_id, member.id).dor_compliant = getEdit(entry.item.work_item_id, member.id).dor_compliant === false ? null : false">
+                              Non
+                            </button>
+                          </div>
+                        </td>
+                        <td>
+                          <input class="vote-input" type="number" step="0.5" min="0"
+                                 [(ngModel)]="getEdit(entry.item.work_item_id, member.id).story_points"
+                                 placeholder="—" />
+                        </td>
+                        <td>
+                          <input class="vote-input" type="number" step="0.25" min="0"
+                                 [(ngModel)]="getEdit(entry.item.work_item_id, member.id).charge_dev_days"
+                                 placeholder="—" />
+                        </td>
+                        <td>
+                          <input class="vote-input" type="number" step="0.25" min="0"
+                                 [(ngModel)]="getEdit(entry.item.work_item_id, member.id).charge_qa_days"
+                                 placeholder="—" />
+                        </td>
+                        <td>
+                          <input class="vote-input vote-input--comment"
+                                 [(ngModel)]="getEdit(entry.item.work_item_id, member.id).comment"
+                                 [title]="getEdit(entry.item.work_item_id, member.id).comment || ''"
+                                 placeholder="…" />
+                        </td>
+                        <td>
+                          <button class="btn btn-secondary btn-sm"
+                                  (click)="saveVote(entry.item.work_item_id, member.id)">
+                            Sauvegarder
+                          </button>
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+              }
+
+              <!-- Plan d'action (si non DOR, stories uniquement) -->
+              @if (!isParentType(entry.item.work_item_id) && isNonDor(entry.item.work_item_id)) {
+                <div class="action-plan-section">
+                  <div class="action-plan-title">Plan d'action (sujet non DOR)</div>
+                  <textarea class="action-plan-input"
+                            rows="3"
+                            placeholder="Décrire les actions à mener avant la prochaine séance…"
+                            [ngModel]="getActionPlan(entry.item)"
+                            (ngModelChange)="actionPlanMap.set(entry.item.id, $event)">
+                  </textarea>
+                  <button class="btn btn-primary btn-sm" (click)="saveActionPlan(entry.item)">Sauvegarder le plan</button>
+                </div>
+              }
+
+            }
+          </div>
+        }
+
+      }
+    </main>
+  </div>
 </div>

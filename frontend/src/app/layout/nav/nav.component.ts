@@ -21,5 +21,6 @@ export class NavComponent {
     { label: 'Suivi & KPIs', route: '/suivi', icon: '📊' },
     { label: 'Historique', route: '/historique', icon: '🕓' },
     { label: 'Paramètres', route: '/parametres', icon: '⚙️' },
+    { label: 'Logs', route: '/logs', icon: '🔎' },
   ];
 }

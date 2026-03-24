@@ -21,6 +21,8 @@ class WorkItem(Base):
     completed_work: Mapped[float | None] = mapped_column(Float)
     remaining_work: Mapped[float | None] = mapped_column(Float)
     parent_id: Mapped[int | None] = mapped_column(Integer)
+    business_value: Mapped[float | None] = mapped_column(Float)
+    effort: Mapped[float | None] = mapped_column(Float)
     synced_at: Mapped[datetime | None] = mapped_column(DateTime)
     iteration_id: Mapped[int | None] = mapped_column(ForeignKey("iterations.id"))
 

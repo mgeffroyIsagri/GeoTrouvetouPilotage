@@ -1,4 +1,499 @@
 <div class="suivi">
-  <h1 class="page-title">Suivi & KPIs</h1>
-  <p class="placeholder">Module en cours de développement — Module 4.</p>
+
+  <!-- ── Toolbar ────────────────────────────────────────────── -->
+  <div class="suivi-toolbar">
+    <h1 class="page-title">Suivi & KPIs</h1>
+    <div class="toolbar-right">
+      @if (selectedPi?.azdo_iteration_path) {
+        <button class="btn btn-danger btn-sm" (click)="dissociateAzdoPath()" title="Dissocier le chemin AZDO de ce PI">
+          ✕ Dissocier AZDO
+        </button>
+      }
+      <select class="pi-select" [(ngModel)]="selectedPiId" (ngModelChange)="onPiChange()">
+        @for (pi of piList; track pi.id) {
+          <option [ngValue]="pi.id">{{ pi.name }}</option>
+        }
+      </select>
+    </div>
+  </div>
+
+  <!-- ── Configuration AZDO ─────────────────────────────────── -->
+  @if (showAzdoConfig) {
+    <div class="azdo-config-card">
+      <div class="azdo-config-icon">⚙️</div>
+      <div class="azdo-config-body">
+        <strong>Associer un chemin d'itération AZDO à ce PI</strong>
+        <p>Le PI n'est pas encore lié à une itération Azure DevOps. Sélectionnez le chemin correspondant pour activer le suivi des tâches.</p>
+        <div class="azdo-config-row">
+          <select class="filter-select" [(ngModel)]="selectedAzdoPath">
+            @for (root of azdoRoots; track root) {
+              <option [value]="root">{{ root }}</option>
+            }
+          </select>
+          <button class="btn btn-primary" (click)="saveAzdoPath()">Associer</button>
+        </div>
+        @if (azdoRoots.length === 0) {
+          <p class="config-hint">Aucune itération AZDO disponible. Lancez d'abord une synchronisation dans Paramètres.</p>
+        }
+      </div>
+    </div>
+  }
+
+  @if (loading) {
+    <div class="loading-state">Chargement des données…</div>
+  } @else if (!selectedPiId) {
+    <div class="empty-state">Sélectionnez un PI pour afficher le suivi.</div>
+  } @else {
+
+    <!-- ── Onglets ──────────────────────────────────────────── -->
+    <div class="tabs">
+      <button class="tab-btn" [class.tab-btn--active]="activeTab === 'general'" (click)="setTab('general')">Tâches — Général</button>
+      <button class="tab-btn" [class.tab-btn--active]="activeTab === 'sp1'"     (click)="setTab('sp1')">SP 1</button>
+      <button class="tab-btn" [class.tab-btn--active]="activeTab === 'sp2'"     (click)="setTab('sp2')">SP 2</button>
+      <button class="tab-btn" [class.tab-btn--active]="activeTab === 'sp3'"     (click)="setTab('sp3')">SP 3</button>
+      <button class="tab-btn" [class.tab-btn--active]="activeTab === 'piall'"      (click)="setTab('piall')">PI ALL</button>
+      <button class="tab-btn" [class.tab-btn--active]="activeTab === 'capacites'" (click)="setTab('capacites')">⚙ Capacités</button>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- Onglet Général                                         -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    @if (activeTab === 'general') {
+      <div class="tab-content">
+
+        <!-- Graphiques Général -->
+        @if (taskGroups.length > 0) {
+          <div class="charts-general">
+            <div class="chart-section">
+              <h3 class="chart-title">Estimation vs Réalisé par Story (rouge = dépassement)</h3>
+              <div class="chart-container chart-container--wide">
+                <canvas id="chart-general" #chartCanvas></canvas>
+              </div>
+            </div>
+            @if (featureGroups.length > 0) {
+              <div class="chart-section">
+                <h3 class="chart-title">Estimation vs Réalisé par Feature / Enabler (rouge = dépassement)</h3>
+                <div class="chart-container chart-container--wide">
+                  <canvas id="chart-feature" #chartCanvas></canvas>
+                </div>
+              </div>
+            }
+          </div>
+        }
+
+        <!-- Filtres -->
+        <div class="filter-bar">
+          <select class="filter-select" [(ngModel)]="filterSprint">
+            <option [ngValue]="null">Tous les sprints</option>
+            <option [ngValue]="1">Sprint 1</option>
+            <option [ngValue]="2">Sprint 2</option>
+            <option [ngValue]="3">Sprint 3</option>
+          </select>
+          <select class="filter-select" [(ngModel)]="filterParentType">
+            <option value="">Tous les types</option>
+            @for (pt of parentTypes; track pt) {
+              <option [value]="pt">{{ pt }}</option>
+            }
+            <option value="__orphan__">(Sans parent)</option>
+          </select>
+          <select class="filter-select" [(ngModel)]="filterAssignee">
+            <option value="">Tous les collaborateurs</option>
+            @for (a of assignees; track a) {
+              <option [value]="a">{{ a }}</option>
+            }
+          </select>
+        </div>
+
+        <!-- Tableau des tâches groupées par story -->
+        <div class="table-wrapper">
+          <table class="tasks-table">
+            <thead>
+              <tr>
+                <th class="col-parent">Story / Parent</th>
+                <th class="col-task">Tâche (ID)</th>
+                <th class="col-assigned">Collaborateur</th>
+                <th class="col-num">Estimation (h)</th>
+                <th class="col-num">Réalisé (h)</th>
+                <th class="col-num">Restant (h)</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (group of taskGroups; track group.parentId) {
+                <!-- Ligne groupe -->
+                <tr class="group-row" [class.group-row--overrun]="group.overrun">
+                  <td class="col-parent">
+                    <span class="type-badge" [ngClass]="'type-badge--' + typeCss(group.parentType)">{{ group.parentType }}</span>
+                    {{ group.parentTitle }}
+                  </td>
+                  <td colspan="2" class="group-count">{{ group.tasks.length }} tâche(s)</td>
+                  <td class="col-num group-num">{{ fmt(group.totalEstimate) }}</td>
+                  <td class="col-num group-num" [class.overrun-val]="group.overrun">{{ fmt(group.totalCompleted) }}</td>
+                  <td class="col-num group-num">{{ fmt(group.totalRemaining) }}</td>
+                </tr>
+                <!-- Lignes tâches -->
+                @for (t of group.tasks; track t.task_id) {
+                  <tr class="task-row">
+                    <td></td>
+                    <td class="col-task">
+                      <span class="task-id">#{{ t.task_id }}</span>
+                      {{ t.task_title }}
+                    </td>
+                    <td class="col-assigned">{{ t.assigned_to ?? '—' }}</td>
+                    <td class="col-num">{{ fmt(t.original_estimate) }}</td>
+                    <td class="col-num" [class.overrun-val]="t.overrun">{{ fmt(t.completed_work) }}</td>
+                    <td class="col-num">{{ fmt(t.remaining_work) }}</td>
+                  </tr>
+                }
+              }
+            </tbody>
+            <tfoot>
+              <tr class="total-row">
+                <td colspan="3"><strong>Total</strong></td>
+                <td class="col-num"><strong>{{ fmt(generalTotals.estimate) }}</strong></td>
+                <td class="col-num"><strong>{{ fmt(generalTotals.completed) }}</strong></td>
+                <td class="col-num"><strong>{{ fmt(generalTotals.remaining) }}</strong></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+      </div>
+    }
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- Onglets SP1 / SP2 / SP3                                -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    @if (activeTab === 'sp1' || activeTab === 'sp2' || activeTab === 'sp3') {
+      @let kpis = kpisForCurrentSprint();
+      <div class="tab-content">
+
+        @if (kpis.length === 0) {
+          <div class="empty-state">Aucune donnée de capacité ou de tâches pour ce sprint.</div>
+        } @else {
+
+          <!-- Grille 2×2 de graphiques -->
+          <div class="charts-grid">
+
+            <div class="chart-card">
+              <div class="chart-container">
+                <canvas id="chart-stories" #chartCanvas></canvas>
+              </div>
+            </div>
+
+            <div class="chart-card">
+              <div class="chart-container">
+                <canvas id="chart-bugs" #chartCanvas></canvas>
+              </div>
+            </div>
+
+            <div class="chart-card">
+              <div class="chart-container">
+                <canvas id="chart-imprevus" #chartCanvas></canvas>
+              </div>
+            </div>
+
+            <div class="chart-card">
+              <div class="chart-container">
+                <canvas id="chart-total" #chartCanvas></canvas>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Tableau récapitulatif sprint -->
+          <div class="table-wrapper" style="margin-top: 24px;">
+            <table class="kpi-table">
+              <thead>
+                <tr>
+                  <th>Collaborateur</th>
+                  <th>Profil</th>
+                  <th class="col-num">Capa Stories (h)</th>
+                  <th class="col-num">Réalisé Stories (h)</th>
+                  <th class="col-num">Capa Bugs (h)</th>
+                  <th class="col-num">Réalisé Bugs (h)</th>
+                  <th class="col-num">Réalisé Maint (h)</th>
+                  <th class="col-num">Capa Totale (h)</th>
+                  <th class="col-num">Réalisé Total (h)</th>
+                  <th class="col-num">% Capa</th>
+                  <th>Analyse IA</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (m of kpis; track m.member_id) {
+                  @let pct = m.capa_total_h > 0 ? m.work_total_h / m.capa_total_h * 100 : null;
+                  <tr>
+                    <td>{{ m.display_name }}</td>
+                    <td><span class="profile-badge">{{ m.profile }}</span></td>
+                    <td class="col-num">{{ fmt(m.capa_stories_h) }}</td>
+                    <td class="col-num">{{ fmt(m.work_stories_h) }}</td>
+                    <td class="col-num">{{ fmt(m.capa_bugs_h) }}</td>
+                    <td class="col-num">{{ fmt(m.work_bugs_h) }}</td>
+                    <td class="col-num">{{ fmt(m.work_maint_h) }}</td>
+                    <td class="col-num">{{ fmt(m.capa_total_h) }}</td>
+                    <td class="col-num">{{ fmt(m.work_total_h) }}</td>
+                    <td class="col-num" [class]="pctColor(pct)">
+                      {{ pct != null ? (pct | number:'1.0-0') + '%' : '—' }}
+                    </td>
+                    <td class="analyze-cell">
+                      <button class="btn btn-secondary btn-sm"
+                              [disabled]="analyzingMemberId === m.member_id"
+                              (click)="analyzeProductivity(m.member_id)"
+                              title="Générer l'analyse de productivité IA">
+                        {{ analyzingMemberId === m.member_id ? '⏳' : '📊 Analyser' }}
+                      </button>
+                      @if (hasSavedReport(m.member_id)) {
+                        <button class="btn btn-primary btn-sm"
+                                [disabled]="loadingReportMemberId === m.member_id"
+                                (click)="showSavedReport(m.member_id)"
+                                title="Voir le dernier rapport sauvegardé">
+                          {{ loadingReportMemberId === m.member_id ? '⏳' : '📄 Rapport' }}
+                        </button>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      </div>
+    }
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- Onglet Capacités                                       -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    @if (activeTab === 'capacites') {
+      <div class="tab-content">
+
+        <!-- Sélecteur sprint + actions -->
+        <div class="capa-toolbar">
+          <div class="capa-sprint-btns">
+            @for (n of [1,2,3]; track n) {
+              <button class="sprint-btn" [class.sprint-btn--active]="capacitesSprintNum === n"
+                      (click)="onCapacitesSprintChange(n)">Sprint {{ n }}</button>
+            }
+          </div>
+          <div class="capa-actions">
+            <button class="btn btn-secondary btn-sm" [disabled]="capacitesImporting"
+                    (click)="importCapacities()" title="Remplace les capacités par les valeurs du PI Planning">
+              {{ capacitesImporting ? '⏳' : '📥' }} Importer depuis PI Planning
+            </button>
+            <button class="btn btn-danger btn-sm" (click)="resetCapacities()">
+              🗑 Réinitialiser
+            </button>
+            <button class="btn btn-primary btn-sm" [disabled]="capacitesSaving"
+                    (click)="saveCapacities()">
+              {{ capacitesSaving ? '⏳ Sauvegarde…' : '💾 Sauvegarder' }}
+            </button>
+          </div>
+        </div>
+
+        @if (editCapacities.length === 0) {
+          <div class="empty-state">
+            Aucune capacité renseignée pour ce sprint.<br>
+            Utilisez <strong>Importer depuis PI Planning</strong> pour démarrer, ou saisissez manuellement.
+          </div>
+        } @else {
+          <div class="table-wrapper">
+            <table class="capa-table">
+              <thead>
+                <tr>
+                  <th>Collaborateur</th>
+                  <th>Profil</th>
+                  <th class="col-num">Stories (h)</th>
+                  <th class="col-num">Bugs/Maint (h)</th>
+                  <th class="col-num">Imprévus (h)</th>
+                  <th class="col-num">Cérémonies (h)</th>
+                  <th class="col-num">Réunions (h)</th>
+                  <th class="col-num">PSM (h)</th>
+                  <th class="col-num">Montée cpt (h)</th>
+                  <th class="col-num col-total">Total (h)</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of editCapacities; track row.team_member_id) {
+                  <tr>
+                    <td>{{ row.display_name }}</td>
+                    <td><span class="profile-badge">{{ row.profile }}</span></td>
+                    <td class="col-num"><input class="capa-input" type="number" min="0" step="0.5" [(ngModel)]="row.capa_stories_h"></td>
+                    <td class="col-num"><input class="capa-input" type="number" min="0" step="0.5" [(ngModel)]="row.capa_bugs_h"></td>
+                    <td class="col-num"><input class="capa-input" type="number" min="0" step="0.5" [(ngModel)]="row.capa_imprevus_h"></td>
+                    <td class="col-num"><input class="capa-input" type="number" min="0" step="0.5" [(ngModel)]="row.capa_agility_h"></td>
+                    <td class="col-num"><input class="capa-input" type="number" min="0" step="0.5" [(ngModel)]="row.capa_reunions_h"></td>
+                    <td class="col-num"><input class="capa-input" type="number" min="0" step="0.5" [(ngModel)]="row.capa_psm_h"></td>
+                    <td class="col-num"><input class="capa-input" type="number" min="0" step="0.5" [(ngModel)]="row.capa_montee_h"></td>
+                    <td class="col-num col-total">{{ fmt(capaTotalRow(row)) }}</td>
+                  </tr>
+                }
+              </tbody>
+              <tfoot>
+                <tr class="total-row">
+                  <td colspan="2"><strong>Total</strong></td>
+                  <td class="col-num"><strong>{{ fmt(capaColumnTotal('capa_stories_h')) }}</strong></td>
+                  <td class="col-num"><strong>{{ fmt(capaColumnTotal('capa_bugs_h')) }}</strong></td>
+                  <td class="col-num"><strong>{{ fmt(capaColumnTotal('capa_imprevus_h')) }}</strong></td>
+                  <td class="col-num"><strong>{{ fmt(capaColumnTotal('capa_agility_h')) }}</strong></td>
+                  <td class="col-num"><strong>{{ fmt(capaColumnTotal('capa_reunions_h')) }}</strong></td>
+                  <td class="col-num"><strong>{{ fmt(capaColumnTotal('capa_psm_h')) }}</strong></td>
+                  <td class="col-num"><strong>{{ fmt(capaColumnTotal('capa_montee_h')) }}</strong></td>
+                  <td class="col-num col-total">
+                    <strong>{{ fmt(capaColumnTotal('capa_stories_h') + capaColumnTotal('capa_bugs_h') + capaColumnTotal('capa_imprevus_h') + capaColumnTotal('capa_agility_h') + capaColumnTotal('capa_reunions_h') + capaColumnTotal('capa_psm_h') + capaColumnTotal('capa_montee_h')) }}</strong>
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        }
+
+      </div>
+    }
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- Onglet PI ALL                                          -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    @if (activeTab === 'piall' && overview) {
+      <div class="tab-content">
+
+        <!-- KPI cards -->
+        <div class="kpi-cards">
+
+          <div class="kpi-card">
+            <div class="kpi-card-title">Toutes tâches confondues</div>
+            <div class="kpi-card-body">
+              <div class="kpi-item">
+                <span class="kpi-label">Capa globale</span>
+                <span class="kpi-value">{{ fmt(overview.kpis.capa_total_h) }}</span>
+              </div>
+              <div class="kpi-item">
+                <span class="kpi-label">Réalisé</span>
+                <span class="kpi-value">{{ fmt(overview.kpis.work_total_h) }}</span>
+              </div>
+              <div class="kpi-item">
+                <span class="kpi-label">% Capa utilisée</span>
+                <span class="kpi-value kpi-big" [class]="pctColor(overview.kpis.pct_capa)">
+                  {{ overview.kpis.pct_capa != null ? (overview.kpis.pct_capa | number:'1.0-0') + '%' : '—' }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-card-title">Imprévus</div>
+            <div class="kpi-card-body">
+              <div class="kpi-item">
+                <span class="kpi-label">Capa Imprévus</span>
+                <span class="kpi-value">{{ fmt(overview.kpis.capa_imprevus_h) }}</span>
+              </div>
+              <div class="kpi-item">
+                <span class="kpi-label">Réalisé</span>
+                <span class="kpi-value">{{ fmt(overview.kpis.work_imprevus_h) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-card-title">Bugs & Maintenances</div>
+            <div class="kpi-card-body">
+              <div class="kpi-item">
+                <span class="kpi-label">Capa Bugs/Maint</span>
+                <span class="kpi-value">{{ fmt(overview.kpis.capa_bugs_h) }}</span>
+              </div>
+              <div class="kpi-item">
+                <span class="kpi-label">Réalisé Bugs</span>
+                <span class="kpi-value">{{ fmt(overview.kpis.work_bugs_h) }}</span>
+              </div>
+              <div class="kpi-item">
+                <span class="kpi-label">Réalisé Maint</span>
+                <span class="kpi-value">{{ fmt(overview.kpis.work_maint_h) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-card-title">Stories</div>
+            <div class="kpi-card-body">
+              <div class="kpi-item">
+                <span class="kpi-label">Capa Stories</span>
+                <span class="kpi-value">{{ fmt(overview.kpis.capa_stories_h) }}</span>
+              </div>
+              <div class="kpi-item">
+                <span class="kpi-label">Réalisé Stories</span>
+                <span class="kpi-value">{{ fmt(overview.kpis.work_stories_h) }}</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Story Points -->
+        <div class="section-title">Story Points des Stories</div>
+        <div class="sp-row">
+          <div class="sp-total-card">
+            <span class="sp-big">{{ overview.story_points.total }}</span>
+            <span class="sp-label">Story Points<br>prévisionnels du PI</span>
+          </div>
+          <div class="chart-container" style="flex:1; max-width: 600px;">
+            <canvas id="chart-sp-state" #chartCanvas></canvas>
+          </div>
+        </div>
+
+        <!-- Features & Enablers -->
+        <div class="section-title">Features & Enablers</div>
+        @if (overview.features.length === 0) {
+          <p class="empty-state">Aucune Feature/Enabler trouvé pour ce PI.</p>
+        } @else {
+          <div class="table-wrapper">
+            <table class="features-table">
+              <thead>
+                <tr>
+                  <th class="col-id">ID</th>
+                  <th>Titre</th>
+                  <th>Type</th>
+                  <th>État</th>
+                  <th class="col-num">Business Value</th>
+                  <th class="col-num">Effort</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (f of overview.features; track f.id) {
+                  <tr>
+                    <td class="col-id">{{ f.id }}</td>
+                    <td>{{ f.title }}</td>
+                    <td><span class="type-badge" [ngClass]="'type-badge--' + typeCss(f.type)">{{ f.type }}</span></td>
+                    <td>{{ f.state ?? '—' }}</td>
+                    <td class="col-num">{{ f.business_value ?? '—' }}</td>
+                    <td class="col-num">{{ f.effort ?? '—' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+
+      </div>
+    }
+
+  }
 </div>
+
+<!-- ── Modal Rapport Analyse ──────────────────────────────── -->
+@if (showAnalysisModal && analysisReport) {
+  <div class="modal-overlay" (click)="closeAnalysisModal()">
+    <div class="modal-panel" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <div class="modal-title">
+          📊 Analyse — {{ analysisReport.member }} — {{ analysisReport.sprint }}
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary btn-sm" (click)="copyAnalysisToClipboard()" title="Copier dans le presse-papier">
+            📋 Copier
+          </button>
+          <button class="modal-close" (click)="closeAnalysisModal()">✕</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <pre class="analysis-text">{{ analysisReport.text }}</pre>
+      </div>
+    </div>
+  </div>
+}
