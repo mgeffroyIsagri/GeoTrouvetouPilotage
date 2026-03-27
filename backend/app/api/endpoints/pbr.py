@@ -1,3 +1,17 @@
+"""
+Endpoints du module PBR (Product Backlog Refinement).
+
+Gestion des sessions PBR, des items (sujets à analyser), des votes d'équipe
+et de l'analyse DoR par IA.
+
+Structure des routes :
+- ``/sessions``          : CRUD sessions, activation, copie, membres exclus
+- ``/sessions/{id}/items``: ajout / suppression / mise à jour des items (sujets)
+- ``/items/{id}/sync``   : synchronisation des stories enfants depuis AZDO
+- ``/items/{id}/analyze``: analyse IA DoR (Enabler / Feature ou Story)
+- ``/sessions/{id}/votes``: CRUD votes par membre
+"""
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -12,12 +26,20 @@ router = APIRouter()
 # ── Schémas ───────────────────────────────────────────────────────────────────
 
 class SessionCreate(BaseModel):
+    """Payload de création d'une session PBR."""
+
     name: str
     date: datetime
     pi_id: int | None = None
 
 
 class SessionResponse(BaseModel):
+    """Représentation publique d'une session PBR.
+
+    ``excluded_member_ids`` est stocké en base comme JSON (TEXT) et
+    désérialisé à la lecture via ``from_orm_custom``.
+    """
+
     id: int
     name: str
     date: datetime
@@ -27,6 +49,10 @@ class SessionResponse(BaseModel):
 
     @classmethod
     def from_orm_custom(cls, obj):
+        """Construit une ``SessionResponse`` depuis un ORM ``PBRSession``.
+
+        Désérialise le champ ``excluded_member_ids`` (stocké comme JSON TEXT).
+        """
         import json as _json
         data = {
             "id": obj.id, "name": obj.name, "date": obj.date,
@@ -40,16 +66,22 @@ class SessionResponse(BaseModel):
 
 
 class ItemCreate(BaseModel):
+    """Payload d'ajout d'un work item à une session PBR."""
+
     work_item_id: int
 
 
 class ItemUpdate(BaseModel):
+    """Payload de mise à jour partielle d'un item PBR (plan d'action, responsable, déprio)."""
+
     action_plan: str | None = None
     refinement_owner_id: int | None = None
     is_deprioritized: bool | None = None
 
 
 class ItemResponse(BaseModel):
+    """Représentation publique d'un item PBR avec le résultat d'analyse IA."""
+
     id: int
     session_id: int
     work_item_id: int
@@ -65,6 +97,8 @@ class ItemResponse(BaseModel):
 
 
 class VoteCreate(BaseModel):
+    """Payload de création d'un vote (conformité DoR + estimations)."""
+
     team_member_id: int
     work_item_id: int
     dor_compliant: bool | None = None
@@ -75,6 +109,8 @@ class VoteCreate(BaseModel):
 
 
 class VoteUpdate(BaseModel):
+    """Payload de mise à jour d'un vote existant."""
+
     dor_compliant: bool | None = None
     comment: str | None = None
     story_points: float | None = None
@@ -83,6 +119,8 @@ class VoteUpdate(BaseModel):
 
 
 class VoteResponse(BaseModel):
+    """Représentation publique d'un vote PBR."""
+
     id: int
     session_id: int
     team_member_id: int
@@ -101,6 +139,7 @@ class VoteResponse(BaseModel):
 
 @router.get("/sessions", response_model=list[SessionResponse])
 def list_sessions(pi_id: int | None = None, db: Session = Depends(get_db)):
+    """Liste toutes les sessions PBR, filtrées optionnellement par PI."""
     q = db.query(PBRSession)
     if pi_id is not None:
         q = q.filter(PBRSession.pi_id == pi_id)
@@ -109,6 +148,7 @@ def list_sessions(pi_id: int | None = None, db: Session = Depends(get_db)):
 
 @router.get("/sessions/{session_id}", response_model=SessionResponse)
 def get_session(session_id: int, db: Session = Depends(get_db)):
+    """Retourne une session PBR par son identifiant."""
     session = db.query(PBRSession).filter(PBRSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session non trouvée")
@@ -117,6 +157,7 @@ def get_session(session_id: int, db: Session = Depends(get_db)):
 
 @router.post("/sessions", response_model=SessionResponse, status_code=201)
 def create_session(payload: SessionCreate, db: Session = Depends(get_db)):
+    """Crée une nouvelle session PBR (inactive par défaut)."""
     session = PBRSession(**payload.model_dump(), is_active=False)
     db.add(session)
     db.commit()
@@ -126,6 +167,7 @@ def create_session(payload: SessionCreate, db: Session = Depends(get_db)):
 
 @router.delete("/sessions/{session_id}", status_code=204)
 def delete_session(session_id: int, db: Session = Depends(get_db)):
+    """Supprime une session et tous ses items / votes associés (cascade ORM)."""
     session = db.query(PBRSession).filter(PBRSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session non trouvée")
@@ -134,6 +176,8 @@ def delete_session(session_id: int, db: Session = Depends(get_db)):
 
 
 class SessionCopy(BaseModel):
+    """Payload pour la duplication d'une session PBR."""
+
     name: str
     date: datetime
     pi_id: int | None = None
@@ -169,6 +213,7 @@ def copy_session(session_id: int, payload: SessionCopy, db: Session = Depends(ge
 
 @router.put("/sessions/{session_id}/activate", response_model=SessionResponse)
 def activate_session(session_id: int, db: Session = Depends(get_db)):
+    """Active une session PBR et désactive toutes les autres (une seule active à la fois)."""
     session = db.query(PBRSession).filter(PBRSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session non trouvée")
@@ -181,6 +226,7 @@ def activate_session(session_id: int, db: Session = Depends(get_db)):
 
 @router.put("/sessions/{session_id}/deactivate", response_model=SessionResponse)
 def deactivate_session(session_id: int, db: Session = Depends(get_db)):
+    """Désactive une session PBR sans en activer une autre."""
     session = db.query(PBRSession).filter(PBRSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session non trouvée")
@@ -191,11 +237,14 @@ def deactivate_session(session_id: int, db: Session = Depends(get_db)):
 
 
 class ExcludedMembersUpdate(BaseModel):
+    """Payload pour mettre à jour la liste des membres exclus d'une session."""
+
     excluded_member_ids: list[int]
 
 
 @router.put("/sessions/{session_id}/excluded-members", response_model=SessionResponse)
 def update_excluded_members(session_id: int, payload: ExcludedMembersUpdate, db: Session = Depends(get_db)):
+    """Met à jour la liste des membres exclus d'une session (stockée en JSON TEXT)."""
     import json as _json
     session = db.query(PBRSession).filter(PBRSession.id == session_id).first()
     if not session:
@@ -210,11 +259,18 @@ def update_excluded_members(session_id: int, payload: ExcludedMembersUpdate, db:
 
 @router.get("/sessions/{session_id}/items", response_model=list[ItemResponse])
 def list_items(session_id: int, db: Session = Depends(get_db)):
+    """Retourne tous les items (sujets) d'une session PBR."""
     return db.query(PBRItem).filter(PBRItem.session_id == session_id).all()
 
 
 @router.post("/sessions/{session_id}/items", response_model=list[ItemResponse], status_code=201)
 def add_item(session_id: int, payload: ItemCreate, db: Session = Depends(get_db)):
+    """Ajoute un work item à la session.
+
+    Si le work item est un Enabler ou une Feature, ses stories enfants
+    connues en base sont automatiquement ajoutées.
+    Retourne la liste de tous les items créés (parent + enfants).
+    """
     session = db.query(PBRSession).filter(PBRSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session non trouvée")
@@ -255,10 +311,11 @@ def add_item(session_id: int, payload: ItemCreate, db: Session = Depends(get_db)
 
 @router.delete("/items/{item_id}", status_code=204)
 def remove_item(item_id: int, db: Session = Depends(get_db)):
+    """Supprime un item et tous ses votes associés dans la session."""
     item = db.query(PBRItem).filter(PBRItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item non trouvé")
-    # Supprimer les votes associés
+    # Supprimer les votes associés avant l'item (pas de cascade FK sur PBRVote)
     db.query(PBRVote).filter(
         PBRVote.session_id == item.session_id,
         PBRVote.work_item_id == item.work_item_id,
@@ -269,6 +326,7 @@ def remove_item(item_id: int, db: Session = Depends(get_db)):
 
 @router.put("/items/{item_id}", response_model=ItemResponse)
 def update_item(item_id: int, payload: ItemUpdate, db: Session = Depends(get_db)):
+    """Met à jour le plan d'action, le responsable ou le statut déprioritisé d'un item."""
     item = db.query(PBRItem).filter(PBRItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item non trouvé")
@@ -309,7 +367,15 @@ def sync_item_children(item_id: int, db: Session = Depends(get_db)):
 
 @router.post("/items/{item_id}/analyze", response_model=ItemResponse)
 async def analyze_item(item_id: int, db: Session = Depends(get_db)):
-    """Déclenche l'analyse IA DOR sur un sujet."""
+    """Déclenche l'analyse IA DoR sur un sujet PBR.
+
+    Flux :
+    1. Récupère le work item (et ses enfants / parent si story) depuis AZDO.
+    2. Formate le contenu en texte structuré.
+    3. Appelle ``LLMClient.analyze_dor`` avec le prompt adapté au type.
+    4. Persiste la note et le commentaire IA sur l'item.
+    5. Loggue chaque étape dans ``llm_log``.
+    """
     item = db.query(PBRItem).filter(PBRItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item non trouvé")
@@ -395,6 +461,7 @@ async def analyze_item(item_id: int, db: Session = Depends(get_db)):
                     pass
         return ids
 
+    # ── Constantes de classification des relations AZDO ───────────────────────
     DEP_LABELS = {
         "System.LinkTypes.Dependency-Forward": "Dépend de",
         "System.LinkTypes.Dependency-Reverse": "Bloqué par",
@@ -717,11 +784,13 @@ Notes PBR des participants :
 
 @router.get("/sessions/{session_id}/votes", response_model=list[VoteResponse])
 def get_votes(session_id: int, db: Session = Depends(get_db)):
+    """Retourne tous les votes d'une session PBR."""
     return db.query(PBRVote).filter(PBRVote.session_id == session_id).all()
 
 
 @router.post("/sessions/{session_id}/votes", response_model=VoteResponse, status_code=201)
 def create_vote(session_id: int, payload: VoteCreate, db: Session = Depends(get_db)):
+    """Enregistre un nouveau vote (conformité DoR + estimations) pour un membre."""
     vote = PBRVote(session_id=session_id, **payload.model_dump())
     db.add(vote)
     db.commit()
@@ -731,6 +800,7 @@ def create_vote(session_id: int, payload: VoteCreate, db: Session = Depends(get_
 
 @router.put("/votes/{vote_id}", response_model=VoteResponse)
 def update_vote(vote_id: int, payload: VoteUpdate, db: Session = Depends(get_db)):
+    """Met à jour un vote existant (tous les champs sont réécrits)."""
     vote = db.query(PBRVote).filter(PBRVote.id == vote_id).first()
     if not vote:
         raise HTTPException(status_code=404, detail="Vote non trouvé")
@@ -743,6 +813,7 @@ def update_vote(vote_id: int, payload: VoteUpdate, db: Session = Depends(get_db)
 
 @router.delete("/votes/{vote_id}", status_code=204)
 def delete_vote(vote_id: int, db: Session = Depends(get_db)):
+    """Supprime un vote."""
     vote = db.query(PBRVote).filter(PBRVote.id == vote_id).first()
     if not vote:
         raise HTTPException(status_code=404, detail="Vote non trouvé")

@@ -59,9 +59,31 @@
             </div>
           }
         </div>
-        <button class="btn btn-primary" (click)="generatePlanning()" [disabled]="generating">
-          {{ generating ? '⏳ Génération…' : '⚡ Générer la capacité' }}
-        </button>
+        <button class="btn btn-secondary" (click)="openPrintModal()">🖨️ Imprimer</button>
+        @if (!activePI?.is_locked) {
+          <!-- Générer capacité -->
+          <div class="reset-wrap">
+            <button class="btn btn-primary" (click)="showGenerateMenu = !showGenerateMenu" [disabled]="generating">
+              {{ generating ? '⏳ Génération…' : '⚡ Générer la capacité' }}
+            </button>
+            @if (showGenerateMenu) {
+              <div class="reset-menu">
+                <button (click)="openGenerateModal('sprint')">Sprint {{ selectedSprint }}</button>
+                <button (click)="openGenerateModal('pi')">Tout le PI</button>
+              </div>
+            }
+          </div>
+          <button class="btn btn-secondary" title="Verrouiller le PI (lecture seule)" (click)="lockPI()">
+            🔒 Verrouiller
+          </button>
+        } @else {
+          <button class="btn btn-warning" title="Déverrouiller le PI (édition)" (click)="unlockPI()">
+            🔓 Déverrouiller
+          </button>
+          <button class="btn btn-admin" [class.btn-admin--active]="showAdminPanel" (click)="showAdminPanel = !showAdminPanel">
+            ⚙️ Admin PI
+          </button>
+        }
       }
     </div>
   </div>
@@ -86,6 +108,28 @@
     </div>
   }
 
+  <!-- ═══ BANNIÈRE LOCK ═══ -->
+  @if (activePI?.is_locked) {
+    <div class="locked-banner">
+      🔒 Ce PI est verrouillé — le planning est en lecture seule.
+      @if (!showAdminPanel) {
+        <button class="locked-banner__action" (click)="showAdminPanel = true">Accéder au panel Admin PI →</button>
+      }
+    </div>
+  }
+
+  <!-- ═══ BANNIÈRE STORIES ORPHELINES ═══ -->
+  @if (!activePI?.is_locked && orphanStoryBlocks.length > 0) {
+    <div class="orphan-banner">
+      ⚠️ <strong>{{ orphanStoryBlocks.length }}</strong> brique(s) story sans work item associé dans ce sprint.
+    </div>
+  }
+
+  <!-- ═══ PANEL ADMIN PI ═══ -->
+  @if (activePI?.is_locked && showAdminPanel) {
+    <app-admin-panel [pi]="activePI!" />
+  }
+
   <!-- ═══ PAS DE PI ═══ -->
   @if (!activePI) {
     <div class="empty-state">
@@ -95,7 +139,7 @@
 
   <!-- ═══ CALENDRIER ═══ -->
   @if (activePI && workingDays.length > 0) {
-    <div class="calendar-wrapper">
+    <div class="calendar-wrapper" #calendarZone>
       <div class="calendar-scroll">
 
         <!-- En-tête semaines -->
@@ -112,9 +156,11 @@
             <span class="col-header-text">Collaborateur</span>
           </div>
           @for (day of workingDays; track day) {
-            <div class="day-col" [class.day-col--friday]="isWeekStart(day)">
-              <span class="day-name">{{ formatDay(day).shortDay }}</span>
-              <span class="day-num">{{ formatDay(day).dayNum }}</span>
+            <div class="day-col" [class.day-col--friday]="isWeekStart(day)" [style.width.px]="COL_WIDTH">
+              @if (!compactCols) {
+                <span class="day-name">{{ formatDay(day).shortDay }}</span>
+              }
+              <span class="day-num">{{ formatDay(day).dayNum }}<span class="day-month">/{{ formatDay(day).monthNum }}</span></span>
             </div>
           }
         </div>
@@ -125,24 +171,28 @@
 
             <!-- Infos membre -->
             <div class="member-info">
-              <span class="member-name">{{ member.display_name }}</span>
+              <div class="member-name-row">
+                <span class="member-name">{{ member.display_name }}</span>
+                @if (hasOrphanBlocks(member.id)) {
+                  <span class="orphan-badge" title="Blocs story sans work item associé">⚠️</span>
+                }
+                <div class="member-actions">
+                  <button class="action-btn" (click)="startAddLeave(member.id)" title="Ajouter un congé">🏖️</button>
+                  @if (canAddStory(member)) {
+                    <button class="action-btn" (click)="startAddStory(member)" title="Ajouter une story">＋</button>
+                  }
+                </div>
+              </div>
               <div class="member-footer">
                 <span class="profile-badge profile-badge--{{ member.profile.toLowerCase().replace(' ', '-') }}">{{ member.profile }}</span>
                 @if (canAddStory(member) || member.profile === 'PSM') {
                   <span class="capacity-label">Capa = {{ getRemainingCapacity(member.id) }}j</span>
-                  <span class="capa-detail-wrap">
-                    <span class="capa-detail-trigger">détail</span>
-                    <div class="capa-detail-tooltip">
-                      @for (item of getCapacityBreakdown(member.id); track item.label) {
-                        <div class="capa-detail-row">
-                          <span>{{ item.label }}</span><span>{{ item.days }}j</span>
-                        </div>
-                      }
-                      <div class="capa-detail-row capa-detail-row--total">
-                        <span>Restant</span><span>{{ getRemainingCapacity(member.id) }}j</span>
-                      </div>
-                    </div>
-                  </span>
+                  <span
+                    class="capa-detail-trigger"
+                    (mouseenter)="showCapaTooltip(member.id, $event)"
+                    (mouseleave)="hideCapaTooltip()"
+                    (click)="toggleDetail(member.id)"
+                  >détail</span>
                 }
               </div>
             </div>
@@ -192,8 +242,11 @@
                   [colWidth]="COL_WIDTH"
                   [totalDays]="totalWorkingDays"
                   [isDraggable]="true"
-                  [isResizable]="true"
+                  [isResizable]="false"
                   [isDeletable]="true"
+                  [customTooltip]="getBlockTooltip(block)"
+                  [isSelected]="isBlockSelected(block)"
+                  [isOrphan]="block.work_item_id === null"
                   (blockMoved)="onBlockMoved($event)"
                   (blockResized)="onBlockResized($event)"
                   (blockClicked)="onStoryBlockClicked($any($event))"
@@ -202,13 +255,6 @@
               }
             </div>
 
-            <!-- Boutons actions -->
-            <div class="row-actions">
-              <button class="add-btn" (click)="startAddLeave(member.id)" title="Ajouter un congé">🏖️</button>
-              @if (canAddStory(member)) {
-                <button class="add-btn" (click)="startAddStory(member)" title="Ajouter une story">＋</button>
-              }
-            </div>
 
           </div>
         }
@@ -227,6 +273,57 @@
     </div>
   }
 
+  <!-- ═══ PANNEAU DÉTAIL COLLABORATEUR ═══ -->
+  @if (detailMemberId) {
+    <div class="detail-drawer">
+      <div class="detail-drawer-header">
+        <span class="detail-drawer-title">
+          Planning détaillé — {{ getMemberById(detailMemberId)?.display_name }} · Sprint {{ selectedSprint }}
+        </span>
+        <button class="detail-close-btn" (click)="detailMemberId = null">✕</button>
+      </div>
+      <div class="detail-drawer-body">
+        <table class="detail-table">
+          <thead>
+            <tr>
+              <th>Début</th>
+              <th>Fin</th>
+              <th>Activité</th>
+              <th>Durée</th>
+              <th>Work Item</th>
+              <th>Commentaire</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (e of getDetailEntries(detailMemberId); track e.sortOffset + e.label) {
+              <tr [class.detail-row--leave]="e.isLeave" [class.detail-row--story]="e.isStory">
+                <td>{{ e.startDate }}</td>
+                <td>{{ e.endDate }}</td>
+                <td class="detail-cat">
+                  <span class="detail-cat-dot block--{{ e.category }}"></span>
+                  {{ e.label }}
+                </td>
+                <td class="detail-duration">{{ e.duration }}j</td>
+                <td class="detail-wi">
+                  @if (e.workItemId) {
+                    @if (buildAzdoUrl(e.workItemId)) {
+                      <a [href]="buildAzdoUrl(e.workItemId)" target="_blank" rel="noopener">
+                        #{{ e.workItemId }}{{ e.workItemTitle ? ' — ' + e.workItemTitle : '' }} ↗
+                      </a>
+                    } @else {
+                      <span>#{{ e.workItemId }}{{ e.workItemTitle ? ' — ' + e.workItemTitle : '' }}</span>
+                    }
+                  }
+                </td>
+                <td class="detail-comment">{{ e.comment }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  }
+
   <!-- ═══ PANNEAU WORK ITEM ═══ -->
   @if (showPanel) {
     <app-work-item-panel
@@ -234,7 +331,27 @@
       [piId]="activePI?.id ?? null"
       (closed)="closePanel()"
       (workItemAssigned)="onWorkItemAssigned($event)"
+      (commentChanged)="onCommentChanged($event)"
+      (workItemLoaded)="workItemsMap.set($event.id, $event)"
     />
+  }
+
+  <!-- ═══ TOOLTIP CAPACITÉ (position: fixed) ═══ -->
+  @if (capaTooltip) {
+    <div
+      class="capa-fixed-tooltip"
+      [style.top.px]="capaTooltip.top"
+      [style.left.px]="capaTooltip.left"
+      (mouseenter)="keepCapaTooltip()"
+      (mouseleave)="hideCapaTooltip()"
+    >
+      @for (item of getCapacityBreakdown(capaTooltip.memberId); track item.label) {
+        <div class="capa-detail-row"><span>{{ item.label }}</span><span>{{ item.days }}j</span></div>
+      }
+      <div class="capa-detail-row capa-detail-row--total">
+        <span>Restant</span><span>{{ getRemainingCapacity(capaTooltip.memberId) }}j</span>
+      </div>
+    </div>
   }
 
   <!-- ═══ MODAL AJOUT CONGÉ ═══ -->
@@ -282,10 +399,65 @@
           <label>Durée (jours)</label>
           <input type="number" class="form-input" min="0.5" [max]="totalWorkingDays * 2" step="0.5" [(ngModel)]="addingStory.duration" />
         </div>
+        <div class="form-row">
+          <label>Work Item ID <span class="optional-label">(optionnel)</span></label>
+          <input type="number" class="form-input" min="1" step="1" [(ngModel)]="addingStory.workItemId" placeholder="ex: 12345" />
+        </div>
         <p class="reset-warning">La brique sera placée automatiquement à la première place disponible.</p>
         <div class="form-actions">
           <button class="btn btn-primary" (click)="confirmAddStory()">Ajouter</button>
           <button class="btn btn-secondary" (click)="addingStory = null">Annuler</button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- ═══ MODAL IMPRESSION ═══ -->
+  @if (printModal) {
+    <div class="modal-overlay" (click)="printModal = null">
+      <div class="modal-card print-modal-card" (click)="$event.stopPropagation()">
+        <h3>🖨️ Imprimer / Exporter PDF</h3>
+
+        <!-- Sélection sprint -->
+        <div class="print-section">
+          <p class="print-section-title">Sprint à imprimer</p>
+          <div class="print-sprint-row">
+            @for (s of SPRINT_CONFIG; track s.number) {
+              <label class="print-radio">
+                <input type="radio" name="printSprint" [value]="s.number" [(ngModel)]="printModal.sprint" />
+                Sprint {{ s.number }} <span class="sprint-days">{{ s.workingDays }}j</span>
+              </label>
+            }
+          </div>
+        </div>
+
+        <!-- Sélection collaborateurs -->
+        <div class="print-section">
+          <div class="print-section-header">
+            <p class="print-section-title">Collaborateurs</p>
+            <div class="print-section-actions">
+              <button class="print-link" (click)="selectAllPrintMembers()">Tout sélectionner</button>
+              <button class="print-link" (click)="clearAllPrintMembers()">Tout désélectionner</button>
+            </div>
+          </div>
+          <div class="print-members-grid">
+            @for (m of teamMembers; track m.id) {
+              <label class="print-checkbox">
+                <input type="checkbox" [checked]="isPrintMemberSelected(m.id)" (change)="togglePrintMember(m.id)" />
+                <span class="profile-badge profile-badge--{{ m.profile.toLowerCase().replace(' ', '-') }}">{{ m.profile }}</span>
+                {{ m.display_name }}
+              </label>
+            }
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button class="btn btn-primary"
+            (click)="generatePrint()"
+            [disabled]="printModal.generating || printModal.memberIds.length === 0">
+            {{ printModal.generating ? '⏳ Génération…' : '🖨️ Générer' }}
+          </button>
+          <button class="btn btn-secondary" (click)="printModal = null">Annuler</button>
         </div>
       </div>
     </div>
@@ -306,9 +478,43 @@
         <div class="form-row reset-check">
           <label><input type="checkbox" [(ngModel)]="resetModal.layer1" /> Autres blocs capacitaires (non verrouillés)</label>
         </div>
+        <div class="form-row">
+          <label class="form-label">Collaborateur</label>
+          <select [(ngModel)]="resetModal.memberId">
+            <option [ngValue]="null">Tous</option>
+            @for (m of teamMembers; track m.id) {
+              <option [ngValue]="m.id">{{ m.display_name }}</option>
+            }
+          </select>
+        </div>
         <div class="form-actions">
           <button class="btn btn-danger" (click)="confirmReset()" [disabled]="!resetModal.leaves && !resetModal.stories && !resetModal.layer1">Supprimer</button>
           <button class="btn btn-secondary" (click)="resetModal = null">Annuler</button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- ═══ MODAL GÉNÉRER LA CAPACITÉ ═══ -->
+  @if (generateModal) {
+    <div class="modal-overlay" (click)="generateModal = null">
+      <div class="modal-card" (click)="$event.stopPropagation()">
+        <h3>Générer la capacité — {{ generateModal.scope === 'sprint' ? 'Sprint ' + selectedSprint : 'PI complet' }}</h3>
+        <p class="reset-warning">Régénère les blocs Layer 1 (blocs fixes). Les stories manuelles ne sont pas affectées.</p>
+        <div class="form-row">
+          <label class="form-label">Collaborateur</label>
+          <select [(ngModel)]="generateModal.memberId">
+            <option [ngValue]="null">Tous</option>
+            @for (m of teamMembers; track m.id) {
+              <option [ngValue]="m.id">{{ m.display_name }}</option>
+            }
+          </select>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary" (click)="confirmGenerate()" [disabled]="generating">
+            {{ generating ? '⏳ Génération…' : '⚡ Générer' }}
+          </button>
+          <button class="btn btn-secondary" (click)="generateModal = null">Annuler</button>
         </div>
       </div>
     </div>

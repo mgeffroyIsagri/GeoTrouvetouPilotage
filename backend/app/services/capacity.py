@@ -47,9 +47,21 @@ SPRINT_WEEKS = {1: 3, 2: 3, 3: 4, 4: 3}
 # Ordre des catégories pour le placement séquentiel
 CATEGORY_ORDER = ["agility", "reunions", "bugs_maintenance", "imprevus", "montee_competence", "psm"]
 
+# Aliases acceptés dans les matrices configurées par l'utilisateur
+CATEGORY_ALIASES: dict[str, str] = {
+    "ceremonies": "agility",
+    "cérémonies": "agility",
+    "bugs": "bugs_maintenance",
+    "stories_dev": "stories_dev",  # ignoré (Layer 2)
+    "stories_qa": "stories_qa",    # ignoré (Layer 2)
+}
 
-def _get_matrix(profile: str, db: Session) -> dict[int, dict[str, float]]:
-    """Charge la matrice depuis les paramètres ou retourne la matrice par défaut."""
+
+def _get_matrix(profile: str, db: Session) -> dict[float, dict[str, float]]:
+    """Charge la matrice depuis les paramètres ou retourne la matrice par défaut.
+
+    Les clés sont normalisées en float (supporte "3", "3.0", "3.5", etc.).
+    """
     key_map = {"Dev": "capacity_matrix_dev", "QA": "capacity_matrix_qa", "PSM": "capacity_matrix_psm"}
     setting_key = key_map.get(profile)
     if setting_key:
@@ -57,37 +69,75 @@ def _get_matrix(profile: str, db: Session) -> dict[int, dict[str, float]]:
         if row and row.value:
             try:
                 raw = json.loads(row.value)
-                return {int(k): v for k, v in raw.items()}
+                normalized: dict[float, dict[str, float]] = {}
+                for k, cats in raw.items():
+                    norm_cats = {CATEGORY_ALIASES.get(c, c): v for c, v in cats.items()}
+                    normalized[float(k)] = norm_cats
+                return normalized
             except Exception:
                 pass
     defaults = {"Dev": DEV_MATRIX_DEFAULT, "QA": QA_MATRIX_DEFAULT, "PSM": PSM_MATRIX_DEFAULT}
-    return defaults.get(profile, DEV_MATRIX_DEFAULT)
+    src = defaults.get(profile, DEV_MATRIX_DEFAULT)
+    return {float(k): v for k, v in src.items()}
 
 
-def generate_pi_planning(pi_id: int, db: Session) -> None:
-    """Supprime les blocs auto-générés existants et régénère le calendrier capacitaire."""
-    db.query(PlanningBlock).filter(
+def generate_pi_planning(
+    pi_id: int,
+    db: Session,
+    team_member_id: int | None = None,
+    sprint_number: int | None = None,
+) -> None:
+    """Supprime les blocs auto-générés existants et régénère le calendrier capacitaire.
+
+    Pour chaque sprint × membre actif (hors profils ignorés) :
+    1. Calcule les demi-journées de congé afin de déduire les jours disponibles
+       par segment hebdomadaire.
+    2. Sélectionne la ligne de matrice correspondant aux jours disponibles (0-5).
+    3. Place séquentiellement un bloc par catégorie en sautant les congés.
+
+    Seule la Layer 1 (blocs fixes) est générée. Les story blocks (Layer 2) ne sont
+    jamais auto-générés.
+
+    Args:
+        pi_id:          Identifiant du PI à régénérer.
+        db:             Session SQLAlchemy active.
+        team_member_id: Si fourni, régénère uniquement ce membre.
+        sprint_number:  Si fourni, régénère uniquement ce sprint.
+
+    Raises:
+        ValueError: Si le PI ou ses itérations sont introuvables.
+    """
+    # ── Suppression des blocs Layer 1 ciblés ────────────────────────────────
+    del_q = db.query(PlanningBlock).filter(
         PlanningBlock.pi_id == pi_id,
         PlanningBlock.is_auto_generated == True,
-    ).delete()
+    )
+    if team_member_id is not None:
+        del_q = del_q.filter(PlanningBlock.team_member_id == team_member_id)
+    if sprint_number is not None:
+        del_q = del_q.filter(PlanningBlock.sprint_number == sprint_number)
+    del_q.delete()
     db.flush()
 
     pi = db.query(PI).filter(PI.id == pi_id).first()
     if not pi:
         raise ValueError(f"PI {pi_id} introuvable")
 
-    sprints = (
-        db.query(Iteration)
-        .filter(Iteration.pi_id == pi_id)
-        .order_by(Iteration.sprint_number)
-        .all()
-    )
+    sprints_q = db.query(Iteration).filter(Iteration.pi_id == pi_id)
+    if sprint_number is not None:
+        sprints_q = sprints_q.filter(Iteration.sprint_number == sprint_number)
+    sprints = sprints_q.order_by(Iteration.sprint_number).all()
     if not sprints:
         raise ValueError(f"Aucune itération trouvée pour le PI {pi_id}. Créez d'abord les sprints.")
 
+    # Profils exclus de la génération capacitaire
     PROFILES_NO_PLANNING = {"Squad Lead", "Automate"}
-    members = db.query(TeamMember).filter(TeamMember.is_active == True).all()
+    members_q = db.query(TeamMember).filter(TeamMember.is_active == True)
+    if team_member_id is not None:
+        members_q = members_q.filter(TeamMember.id == team_member_id)
+    members = members_q.all()
 
+    # ── Génération sprint par sprint ──────────────────────────────────────────
     for sprint in sprints:
         sprint_num = sprint.sprint_number
         n_weeks = SPRINT_WEEKS.get(sprint_num, 3)
@@ -127,6 +177,7 @@ def generate_pi_planning(pi_id: int, db: Session) -> None:
             total_fixed = 0.0
             blocks_data: list[dict] = []
 
+            # ── Placement des blocs par segment hebdomadaire ──────────────────
             for seg_start, seg_end in segments:
                 seg_size = seg_end - seg_start  # nb nominal de jours dans ce segment
 
@@ -137,8 +188,10 @@ def generate_pi_planning(pi_id: int, db: Session) -> None:
                 ) * 0.5
                 available_days = seg_size - leaves_this_seg
 
-                n_available = max(0, min(5, int(round(available_days))))
-                week_matrix = matrix.get(n_available, {})
+                # Arrondi au 0.5 le plus proche (ex. 3.5 jours dispo → clé 3.5).
+                # Fallback sur la clé entière inférieure si la demi-journée n'est pas définie.
+                n_available = max(0.0, min(5.0, round(available_days * 2) / 2))
+                week_matrix = matrix.get(n_available) or matrix.get(float(int(n_available)), {})
 
                 cursor = seg_start
                 for cat in CATEGORY_ORDER:

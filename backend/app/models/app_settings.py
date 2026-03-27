@@ -1,3 +1,5 @@
+"""Modèle ORM et constantes pour les paramètres de l'application."""
+
 from sqlalchemy import Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -5,17 +7,30 @@ from app.models.base import Base
 
 
 class AppSettings(Base):
-    """Paramètres de l'application (clé/valeur)."""
+    """Paramètres de l'application stockés sous forme clé/valeur.
+
+    Chaque paramètre est identifié par une clé unique (``key``) et contient
+    une valeur textuelle (``value``) potentiellement chiffrée pour les clés
+    sensibles (PAT, clé API LLM). La liste des clés prédéfinies est dans
+    ``SETTING_KEYS``.
+
+    Le chiffrement et le masquage des clés sensibles sont gérés dans
+    ``app/services/crypto.py`` et appliqués dans l'endpoint ``settings.py``.
+    """
 
     __tablename__ = "app_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Clé unique du paramètre (voir SETTING_KEYS pour les clés prédéfinies)
     key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    # Valeur textuelle, potentiellement chiffrée (clés sensibles)
     value: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(String(500))
 
 
-# Clés prédéfinies
+# ── Clés prédéfinies ───────────────────────────────────────────────────────────
+
+# Mapping clé → description affichée dans l'interface Paramètres
 SETTING_KEYS = {
     "azdo_organization": "URL organisation Azure DevOps",
     "azdo_project": "Nom du projet Azure DevOps",

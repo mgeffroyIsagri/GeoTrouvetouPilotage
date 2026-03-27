@@ -1,3 +1,12 @@
+"""Orchestration de la synchronisation Azure DevOps → base de données locale.
+
+Ce module expose ``AzdoSyncService``, le point d'entrée unique pour :
+- tester la connexion AZDO (``test_connection``)
+- synchroniser itérations, membres et work items (``sync_all``)
+
+Toutes les opérations AZDO sont **en lecture seule**.
+"""
+
 import json
 from datetime import datetime
 from sqlalchemy.orm import Session
@@ -12,14 +21,35 @@ from app.models.app_settings import AppSettings
 
 
 class AzdoSyncService:
+    """Service d'orchestration de la synchronisation Azure DevOps.
+
+    Args:
+        db: Session SQLAlchemy active fournie par l'injection de dépendances.
+    """
+
     def __init__(self, db: Session):
         self.db = db
 
     def _get_setting(self, key: str) -> str | None:
+        """Lit un paramètre applicatif et déchiffre les clés sensibles.
+
+        Args:
+            key: Clé dans la table ``app_settings``.
+
+        Returns:
+            Valeur déchiffrée (ou en clair si non sensible), ou ``None`` si absente.
+        """
         row = self.db.query(AppSettings).filter(AppSettings.key == key).first()
-        return row.value if row else None
+        value = row.value if row else None
+        from app.services.crypto import decrypt_value, SENSITIVE_KEYS
+        return decrypt_value(value) if key in SENSITIVE_KEYS else value
 
     def _build_client(self) -> AzdoClient:
+        """Construit un ``AzdoClient`` à partir des paramètres stockés en base.
+
+        Raises:
+            ValueError: Si l'organisation, le projet ou le PAT sont manquants.
+        """
         org = self._get_setting("azdo_organization")
         project = self._get_setting("azdo_project")
         pat = self._get_setting("azdo_pat")
@@ -56,18 +86,32 @@ class AzdoSyncService:
         return log.synced_at if log else None
 
     async def sync_all(self, full_sync: bool = False, since_date: datetime | None = None) -> dict:
+        """Synchronise itérations, membres et work items depuis AZDO.
+
+        Args:
+            full_sync:  Si ``True``, ignore le filtre de date (synchro complète).
+            since_date: Date minimale de modification pour le filtre incrémental.
+                        Si ``None`` et ``full_sync=False``, utilise la date de la
+                        dernière synchro réussie.
+
+        Returns:
+            Dictionnaire ``{"items_synced": int, "counts": {"iterations": int, ...}}``.
+
+        Raises:
+            ValueError: En cas d'erreur AZDO (message traduit par ``map_azdo_error``).
+        """
         client = self._build_client()
         team = self._get_setting("azdo_team") or ""
         counts = {"iterations": 0, "members": 0, "work_items": 0}
 
         # Détermine la date de filtrage
         if full_sync:
-            since_date = None  # Pas de filtre
+            since_date = None  # Pas de filtre → synchro complète
         elif since_date is None:
             since_date = self._last_successful_sync_date()  # Auto-détection
 
         try:
-            # Synchronisation des itérations
+            # ── Synchronisation des itérations ────────────────────────────────
             iterations = await client.get_iterations(team)
             for it in iterations:
                 attrs = it.get("attributes", {})
@@ -84,7 +128,7 @@ class AzdoSyncService:
                 counts["iterations"] += 1
             self.db.commit()
 
-            # Synchronisation des membres d'équipe
+            # ── Synchronisation des membres d'équipe ──────────────────────────
             if team:
                 members = await client.get_team_members(team)
                 for m in members:
@@ -99,7 +143,7 @@ class AzdoSyncService:
                     counts["members"] += 1
                 self.db.commit()
 
-            # Synchronisation des work items
+            # ── Synchronisation des work items ────────────────────────────────
             date_filter = ""
             if since_date:
                 since_str = since_date.strftime("%Y-%m-%dT%H:%M:%SZ")

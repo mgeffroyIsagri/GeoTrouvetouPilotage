@@ -1,3 +1,6 @@
+// ── PI & Iterations ───────────────────────────────────────────────────────────
+
+/** Représente un Program Increment (PI) — unité de planification de 4 sprints. */
 export interface PI {
   id: number;
   name: string;
@@ -5,8 +8,31 @@ export interface PI {
   end_date: string;
   azdo_iteration_path: string | null;
   is_active: boolean;
+  is_locked: boolean;
 }
 
+/** Itération Azure DevOps synchronisée (utilisée dans les paramètres / associations). */
+export interface Iteration {
+  id: number;
+  azdo_id: string | null;
+  name: string;
+  path: string | null;
+  start_date: string | null;
+  end_date: string | null;
+}
+
+/** Métadonnées d'un sprint au sein d'un PI (dates calculées côté backend). */
+export interface SprintIteration {
+  id: number;
+  name: string;
+  sprint_number: number;
+  start_date: string;
+  end_date: string;
+}
+
+// ── Équipe ────────────────────────────────────────────────────────────────────
+
+/** Membre de l'équipe GeoTrouvetou avec son profil et son identifiant Azure DevOps. */
 export interface TeamMember {
   id: number;
   azdo_id: string | null;
@@ -16,6 +42,9 @@ export interface TeamMember {
   is_active: boolean;
 }
 
+// ── PI Planning — blocs & congés ─────────────────────────────────────────────
+
+/** Bloc de capacité ou de story sur le planning d'un sprint. */
 export interface PlanningBlock {
   id: number;
   pi_id: number;
@@ -30,8 +59,10 @@ export interface PlanningBlock {
   is_locked: boolean;
   work_item_id: number | null;
   group_id: number | null;
+  comment: string | null;
 }
 
+/** Absence / congé d'un membre sur un sprint, exprimé en day_offset. */
 export interface Leave {
   id: number;
   pi_id: number;
@@ -42,14 +73,10 @@ export interface Leave {
   label: string | null;
 }
 
-export interface SprintIteration {
-  id: number;
-  name: string;
-  sprint_number: number;
-  start_date: string;
-  end_date: string;
-}
-
+/**
+ * Catégories possibles pour un `PlanningBlock`.
+ * Layer 1 = blocs fixes auto-générés ; Layer 2 = stories manuelles.
+ */
 export type BlockCategory =
   | 'stories_dev'
   | 'stories_qa'
@@ -61,6 +88,7 @@ export type BlockCategory =
   | 'montee_competence'
   | 'conges';
 
+/** Labels d'affichage correspondant à chaque `BlockCategory`. */
 export const BLOCK_CATEGORY_LABELS: Record<BlockCategory, string> = {
   stories_dev: 'Stories Dev',
   stories_qa: 'Stories QA',
@@ -73,6 +101,9 @@ export const BLOCK_CATEGORY_LABELS: Record<BlockCategory, string> = {
   conges: 'Congés / Absences',
 };
 
+// ── Azure DevOps — Work Items ─────────────────────────────────────────────────
+
+/** Work Item Azure DevOps synchronisé localement (lecture seule). */
 export interface WorkItem {
   id: number;
   type: string;
@@ -89,15 +120,9 @@ export interface WorkItem {
   synced_at: string | null;
 }
 
-export interface Iteration {
-  id: number;
-  azdo_id: string | null;
-  name: string;
-  path: string | null;
-  start_date: string | null;
-  end_date: string | null;
-}
+// ── PBR (Product Backlog Refinement) ─────────────────────────────────────────
 
+/** Session de PBR regroupant des items à affiner et leurs votes. */
 export interface PBRSession {
   id: number;
   name: string;
@@ -107,6 +132,7 @@ export interface PBRSession {
   excluded_member_ids: number[];
 }
 
+/** Item (Enabler / Feature / Story) inscrit dans une session PBR. */
 export interface PBRItem {
   id: number;
   session_id: number;
@@ -119,6 +145,7 @@ export interface PBRItem {
   is_deprioritized: boolean;
 }
 
+/** Vote individuel d'un membre sur un item lors d'une session PBR. */
 export interface PBRVote {
   id: number;
   session_id: number;
@@ -131,12 +158,16 @@ export interface PBRVote {
   charge_qa_days: number | null;
 }
 
+// ── Paramètres & synchronisation ─────────────────────────────────────────────
+
+/** Paire clé / valeur stockée dans la table `app_settings`. */
 export interface AppSetting {
   key: string;
   value: string | null;
   description: string | null;
 }
 
+/** Résultat retourné après une synchronisation manuelle depuis Azure DevOps. */
 export interface SyncResult {
   status: string;
   message: string;
@@ -144,6 +175,7 @@ export interface SyncResult {
   counts: { iterations: number; members: number; work_items: number };
 }
 
+/** Entrée de journal d'une synchronisation Azure DevOps. */
 export interface SyncLog {
   id: number;
   synced_at: string;
@@ -152,6 +184,7 @@ export interface SyncLog {
   items_synced: number;
 }
 
+/** Résultat d'un test de connexion Azure DevOps. */
 export interface ConnectionTestResult {
   ok: boolean;
   error: string | null;
@@ -160,6 +193,10 @@ export interface ConnectionTestResult {
 
 // ── Suivi & KPIs ─────────────────────────────────────────────────────────────
 
+/**
+ * Capacité manuelle saisie (ou importée depuis le planning) pour un membre sur un sprint.
+ * Toutes les valeurs sont en heures.
+ */
 export interface SprintCapacity {
   id?: number;
   pi_id: number;
@@ -176,6 +213,7 @@ export interface SprintCapacity {
   capa_montee_h: number;
 }
 
+/** Tâche AZDO enrichie avec les informations parent / grand-parent pour le module Suivi. */
 export interface SuiviTask {
   task_id: number;
   task_title: string;
@@ -196,6 +234,7 @@ export interface SuiviTask {
   overrun: boolean;
 }
 
+/** KPIs capacité vs. réalisé par membre pour un sprint donné. */
 export interface SprintMemberKpi {
   member_id: number;
   display_name: string;
@@ -212,6 +251,7 @@ export interface SprintMemberKpi {
   work_total_h: number;
 }
 
+/** Vue d'ensemble KPIs d'un PI entier : agrégats capacité / réalisé et story points par état. */
 export interface SuiviOverview {
   kpis: {
     capa_total_h: number;
@@ -239,6 +279,35 @@ export interface SuiviOverview {
   }[];
 }
 
+// ── KPI du Train ─────────────────────────────────────────────────────────────
+
+/** Équipe du train (ensemble de repos AZDO) utilisée pour les KPIs de contribution. */
+export interface TrainTeam {
+  id: number;
+  name: string;
+  azdo_repos: string[];   // désérialisé depuis le JSON string backend
+  branch_filter: string;
+  color: string | null;
+}
+
+/** Entrée KPI d'une équipe pour un PI donné (métriques Git/AZDO). */
+export interface TrainKpiEntry {
+  id: number;
+  pi_id: number;
+  team_id: number;
+  team: TrainTeam;
+  capacity_days: number | null;
+  lines_added: number;
+  lines_deleted: number;
+  commits_count: number;
+  files_changed: number;
+  is_partial: boolean;
+  analyzed_at: string | null;
+}
+
+// ── Logs LLM ─────────────────────────────────────────────────────────────────
+
+/** Entrée de journal traçant un appel LLM ou une récupération AZDO. */
 export interface LLMLog {
   id: number;
   created_at: string;

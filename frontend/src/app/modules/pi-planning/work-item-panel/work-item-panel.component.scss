@@ -45,6 +45,10 @@
   margin-bottom: 10px;
 }
 .wi-id { color: var(--color-text-secondary); font-size: 12px; }
+.wi-id--link {
+  color: var(--color-primary); text-decoration: none; font-weight: 600;
+  &:hover { text-decoration: underline; }
+}
 .wi-type {
   background: #e8f0fe; color: #1a73e8;
   padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 600;
@@ -63,7 +67,38 @@
 .wi-section-title { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
 .wi-html { font-size: 13px; line-height: 1.6; color: var(--color-text-secondary); }
 
+.comment-section {
+  padding: 10px 16px;
+  border-top: 1px solid var(--color-border);
+}
+.comment-label { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); display: block; margin-bottom: 4px; }
+.comment-input {
+  width: 100%; box-sizing: border-box;
+  padding: 6px 8px; border: 1px solid var(--color-border); border-radius: 4px;
+  font-size: 12px; resize: vertical; font-family: inherit; color: var(--color-text);
+  background: var(--color-background);
+  &:focus { outline: none; border-color: var(--color-primary); }
+}
+
 .picker { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; flex: 1; overflow: hidden; }
+
+.picker-filter {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 10px; background: var(--color-background);
+  border: 1px solid var(--color-border); border-radius: 4px; font-size: 12px;
+}
+.filter-checkbox {
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+  color: var(--color-text-secondary); font-weight: 500;
+  input[type=checkbox] { cursor: pointer; }
+}
+.picker-iteration {
+  padding: 5px 8px; border: 1px solid var(--color-border); border-radius: 4px;
+  font-size: 12px; font-family: monospace; color: var(--color-text);
+  background: var(--color-surface);
+  &:focus { outline: none; border-color: var(--color-primary); }
+}
+
 .picker-search {
   padding: 7px 10px; border: 1px solid var(--color-border); border-radius: 4px; font-size: 13px;
   &:focus { outline: none; border-color: var(--color-primary); }

@@ -1,6 +1,8 @@
 <div class="app-shell">
-  <app-nav />
-  <main class="app-content">
+  @if (authService.isLoggedIn()) {
+    <app-nav />
+  }
+  <main [class.app-content]="authService.isLoggedIn()">
     <router-outlet />
   </main>
 </div>

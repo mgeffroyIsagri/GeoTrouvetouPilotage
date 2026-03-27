@@ -165,7 +165,123 @@
     <!-- ═══════════════════════════════════════════════════════ -->
     @if (activeTab === 'sp1' || activeTab === 'sp2' || activeTab === 'sp3') {
       @let kpis = kpisForCurrentSprint();
+      @let currentSprintNum = activeTab === 'sp1' ? 1 : activeTab === 'sp2' ? 2 : 3;
       <div class="tab-content">
+
+        <!-- Stories planifiées -->
+        <div class="planned-stories-section">
+          <div class="planned-stories-header">
+            <h3 class="planned-stories-title">📋 Stories planifiées — Sprint {{ currentSprintNum }}</h3>
+            <div class="planned-stories-filters">
+              <select [(ngModel)]="storyFilterMember" class="story-filter-select">
+                <option value="">Tous les membres</option>
+                @for (m of allMembers(currentSprintNum); track m) {
+                  <option [value]="m">{{ m }}</option>
+                }
+              </select>
+              <select [(ngModel)]="storyFilterState" class="story-filter-select">
+                <option value="">Tous les états</option>
+                @for (s of allStoryStates(currentSprintNum); track s) {
+                  <option [value]="s">{{ s }}</option>
+                }
+              </select>
+              <button class="btn-refresh-stories" (click)="refreshPlannedStories(currentSprintNum)" title="Rafraîchir">↺</button>
+            </div>
+          </div>
+
+          @if (plannedStoriesLoading[currentSprintNum]) {
+            <p class="stories-loading">⏳ Chargement des stories…</p>
+          }
+
+          @if (!plannedStoriesLoading[currentSprintNum] && plannedStoriesData[currentSprintNum]) {
+            @if (filteredPlannedGroups(currentSprintNum).length === 0 && filteredOrphans(currentSprintNum).length === 0) {
+              <p class="stories-empty">Aucune story planifiée sur ce sprint.</p>
+            }
+
+            @for (group of filteredPlannedGroups(currentSprintNum); track group.parent_id) {
+              <div class="feature-group">
+                <div class="feature-group__header">
+                  <span class="wi-type-badge wi-type-badge--{{ group.parent_type | lowercase }}">{{ group.parent_type }}</span>
+                  @if (buildAzdoUrl(group.parent_id)) {
+                    <a [href]="buildAzdoUrl(group.parent_id)" target="_blank" class="wi-link">#{{ group.parent_id }} {{ group.parent_title }} ↗</a>
+                  } @else {
+                    <span>#{{ group.parent_id }} {{ group.parent_title }}</span>
+                  }
+                  <span class="wi-state-badge">{{ group.parent_state }}</span>
+                </div>
+                <div class="stories-list">
+                  @for (story of group.stories; track story.id) {
+                    <div class="story-row" [class.story-row--not-dor]="story.dor_note !== null && story.dor_note < 7">
+                      <div class="story-row__main">
+                        <span class="wi-type-badge wi-type-badge--story">{{ story.type }}</span>
+                        @if (buildAzdoUrl(story.id)) {
+                          <a [href]="buildAzdoUrl(story.id)" target="_blank" class="wi-link story-title">#{{ story.id }} {{ story.title }} ↗</a>
+                        } @else {
+                          <span class="story-title">#{{ story.id }} {{ story.title }}</span>
+                        }
+                        <span class="wi-state-badge wi-state-badge--{{ story.state | lowercase }}">{{ story.state }}</span>
+                      </div>
+                      <div class="story-row__meta">
+                        <span class="story-members">👤 {{ getMemberNames(story.members) }}</span>
+                        <span class="story-days">{{ story.total_days }}j / {{ story.total_hours }}h</span>
+                        @if (story.dor_note !== null) {
+                          <span class="dor-badge" [class.dor-badge--ok]="story.dor_note >= 7" [class.dor-badge--nok]="story.dor_note < 7"
+                            [title]="story.dor_comment || ''">
+                            DoR {{ story.dor_note }}/10
+                          </span>
+                        } @else {
+                          <span class="dor-badge dor-badge--unknown">DoR ?</span>
+                        }
+                        @if (story.pbr_item_id) {
+                          <button class="btn-analyze-dor" (click)="analyzeStory(story.pbr_item_id!, story.id, currentSprintNum)"
+                            [disabled]="analyzingStoryId === story.id" title="Analyser la conformité DoR via IA">
+                            {{ analyzingStoryId === story.id ? '⏳' : '🤖 Analyser DoR' }}
+                          </button>
+                        }
+                      </div>
+                      @if (story.dor_note !== null && story.dor_note < 7 && story.dor_comment) {
+                        <div class="dor-comment">⚠️ {{ story.dor_comment | slice:0:200 }}{{ (story.dor_comment ? story.dor_comment.length : 0) > 200 ? '…' : '' }}</div>
+                      }
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+
+            @if (filteredOrphans(currentSprintNum).length > 0) {
+              <div class="feature-group feature-group--orphan">
+                <div class="feature-group__header"><span class="wi-type-badge">Sans parent</span></div>
+                <div class="stories-list">
+                  @for (story of filteredOrphans(currentSprintNum); track story.id) {
+                    <div class="story-row" [class.story-row--not-dor]="story.dor_note !== null && story.dor_note < 7">
+                      <div class="story-row__main">
+                        <span class="wi-type-badge wi-type-badge--story">{{ story.type }}</span>
+                        @if (buildAzdoUrl(story.id)) {
+                          <a [href]="buildAzdoUrl(story.id)" target="_blank" class="wi-link story-title">#{{ story.id }} {{ story.title }} ↗</a>
+                        } @else {
+                          <span class="story-title">#{{ story.id }} {{ story.title }}</span>
+                        }
+                        <span class="wi-state-badge">{{ story.state }}</span>
+                      </div>
+                      <div class="story-row__meta">
+                        <span class="story-members">👤 {{ getMemberNames(story.members) }}</span>
+                        <span class="story-days">{{ story.total_days }}j / {{ story.total_hours }}h</span>
+                        @if (story.dor_note !== null) {
+                          <span class="dor-badge" [class.dor-badge--ok]="story.dor_note >= 7" [class.dor-badge--nok]="story.dor_note < 7">DoR {{ story.dor_note }}/10</span>
+                        }
+                        @if (story.pbr_item_id) {
+                          <button class="btn-analyze-dor" (click)="analyzeStory(story.pbr_item_id!, story.id, currentSprintNum)" [disabled]="analyzingStoryId === story.id">
+                            {{ analyzingStoryId === story.id ? '⏳' : '🤖 Analyser DoR' }}
+                          </button>
+                        }
+                      </div>
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+          }
+        </div>
 
         @if (kpis.length === 0) {
           <div class="empty-state">Aucune donnée de capacité ou de tâches pour ce sprint.</div>

@@ -1,0 +1,422 @@
+<div class="admin-panel">
+
+  <!-- Header -->
+  <div class="admin-panel__header">
+    <span class="admin-panel__title">⚙️ Admin PI — {{ pi.name }}</span>
+    <span class="admin-panel__subtitle">Opérations AZDO pour le passage de PI · PAT requis : Work Items Read &amp; Write</span>
+  </div>
+
+  <!-- Tabs -->
+  <div class="admin-tabs">
+    <button class="admin-tab" [class.admin-tab--active]="activeTab === 'iterations'" (click)="selectTab('iterations')">
+      1 · Itérations AZDO
+    </button>
+    <button class="admin-tab" [class.admin-tab--active]="activeTab === 'unclosed'" (click)="selectTab('unclosed')">
+      2 · Items non clôturés
+    </button>
+    <button class="admin-tab" [class.admin-tab--active]="activeTab === 'parents'" (click)="selectTab('parents')">
+      3 · Chemins parents
+    </button>
+    <button class="admin-tab" [class.admin-tab--active]="activeTab === 'stories'" (click)="selectTab('stories')">
+      4 · Chemins stories
+    </button>
+    <button class="admin-tab" [class.admin-tab--active]="activeTab === 'hors-prod'" (click)="selectTab('hors-prod')">
+      5 · Hors-Prod
+    </button>
+    <button class="admin-tab" [class.admin-tab--active]="activeTab === 'story-tasks'" (click)="selectTab('story-tasks')">
+      6 · Tâches stories
+    </button>
+  </div>
+
+  <!-- ═══ TAB 1 : Itérations AZDO ═══ -->
+  @if (activeTab === 'iterations') {
+    <div class="admin-section">
+      <p class="admin-desc">
+        Vérifie et crée les nœuds d'itération AZDO pour l'équipe et les 4 sprints du nouveau PI
+        sous <code>{{ pi.azdo_iteration_path || '(chemin non configuré)' }}</code>.
+      </p>
+      <div class="admin-actions">
+        <button class="btn btn-check" (click)="checkIterations()" [disabled]="iterChecking">
+          {{ iterChecking ? '⏳ Vérification…' : '🔍 Vérifier' }}
+        </button>
+        @if (iterMissingCount > 0) {
+          <button class="btn btn-exec" (click)="createMissingIterations()" [disabled]="iterCreating">
+            {{ iterCreating ? '⏳ Création…' : '✚ Créer ' + iterMissingCount + ' nœud(s) manquant(s)' }}
+          </button>
+        }
+      </div>
+
+      @if (iterError) { <p class="admin-error">{{ iterError }}</p> }
+
+      @if (iterResult) {
+        <div class="admin-result" [class.admin-result--ok]="!iterResult.errors?.length" [class.admin-result--warn]="iterResult.errors?.length">
+          @if (iterResult.created?.length) {
+            <p>✅ {{ iterResult.created!.length }} nœud(s) créé(s).</p>
+          }
+          @for (e of iterResult.errors; track $index) {
+            <p class="admin-result__error">❌ {{ e.path }} : {{ e.error }}</p>
+          }
+        </div>
+      }
+
+      @if (iterItems.length > 0) {
+        <table class="admin-table">
+          <thead><tr><th>Nœud</th><th>Chemin attendu</th><th>Statut</th></tr></thead>
+          <tbody>
+            @for (item of iterItems; track item.path) {
+              <tr>
+                <td>{{ item.label }}</td>
+                <td class="admin-table__path">{{ item.path }}</td>
+                <td>
+                  @if (item.exists) {
+                    <span class="badge badge--ok">✓ Existe</span>
+                  } @else {
+                    <span class="badge badge--missing">✗ Manquant</span>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+    </div>
+  }
+
+  <!-- ═══ TAB 2 : Items non clôturés ═══ -->
+  @if (activeTab === 'unclosed') {
+    <div class="admin-section">
+      <p class="admin-desc">
+        Liste les work items non clôturés du PI précédent
+        @if (unclosedPrevPi) { (<strong>{{ unclosedPrevPi.name }}</strong>) }
+        encore actifs dans AZDO. Vous pouvez les fermer ou les déplacer vers le nouveau PI.
+      </p>
+      <div class="admin-actions">
+        <button class="btn btn-check" (click)="loadUnclosedItems()" [disabled]="unclosedLoading">
+          {{ unclosedLoading ? '⏳ Chargement…' : '🔍 Charger les items' }}
+        </button>
+        @if (unclosedItems.length > 0) {
+          <select [(ngModel)]="resolveReason" class="resolve-reason-select" title="Raison de résolution">
+            @for (r of resolveReasons; track r) {
+              <option [value]="r">{{ r }}</option>
+            }
+          </select>
+          <button class="btn btn-exec btn-exec--warn" (click)="resolveItems()" [disabled]="unclosedResolving || !canResolveSelected"
+            title="Passer en Resolved les items sélectionnés non encore résolus">
+            {{ unclosedResolving ? '⏳…' : '✓ Résoudre (' + resolveableCount + ')' }}
+          </button>
+          <button class="btn btn-exec btn-exec--danger" (click)="closeTasks()" [disabled]="unclosedClosing || !canCloseSelected"
+            title="Fermer uniquement les items Resolved sélectionnés">
+            {{ unclosedClosing ? '⏳…' : '✕ Fermer (' + closableCount + ')' }}
+          </button>
+          <select [(ngModel)]="moveTargetSprint" class="resolve-reason-select" title="Sprint cible">
+            @for (opt of moveSprintOptions; track opt.value) {
+              <option [value]="opt.value">{{ opt.label }}</option>
+            }
+          </select>
+          <button class="btn btn-exec" (click)="moveToNewPi()" [disabled]="unclosedMoving || !selectedUnclosedIds.length">
+            {{ unclosedMoving ? '⏳…' : '→ Déplacer vers nouveau PI (' + selectedUnclosedIds.length + ')' }}
+          </button>
+        }
+      </div>
+
+      @if (unclosedError) { <p class="admin-error">{{ unclosedError }}</p> }
+
+      @if (unclosedResult) {
+        <div class="admin-result" [class.admin-result--ok]="!unclosedResult.errors?.length">
+          @if (unclosedResult.updated?.length) {
+            <p>✅ {{ unclosedResult.updated!.length }} item(s) traité(s).</p>
+          }
+          @for (e of unclosedResult.errors; track $index) {
+            <p class="admin-result__error">❌ #{{ e.id }} : {{ e.error }}</p>
+          }
+          @for (w of $any(unclosedResult).warnings; track $index) {
+            <p class="admin-result__warn">⚠️ #{{ w.id }} : {{ w.warning }}</p>
+          }
+        </div>
+      }
+
+      @if (unclosedItems.length > 0) {
+        <div class="admin-filter">
+          <span class="admin-filter__label">Filtrer :</span>
+          <button class="filter-btn" [class.filter-btn--active]="unclosedFilter === 'all'" (click)="unclosedFilter = 'all'">Tous ({{ unclosedItems.length }})</button>
+          <button class="filter-btn" [class.filter-btn--active]="unclosedFilter === 'Task'" (click)="unclosedFilter = 'Task'">Tâches</button>
+          <button class="filter-btn" [class.filter-btn--active]="unclosedFilter === 'Bug'" (click)="unclosedFilter = 'Bug'">Bugs</button>
+          <button class="filter-btn" [class.filter-btn--active]="unclosedFilter === 'Story'" (click)="unclosedFilter = 'Story'">Stories</button>
+          <button class="filter-btn" [class.filter-btn--active]="unclosedFilter === 'Feature'" (click)="unclosedFilter = 'Feature'">Features/Enablers</button>
+          <button class="filter-btn" [class.filter-btn--active]="unclosedFilter === 'Question'" (click)="unclosedFilter = 'Question'">Questions</button>
+        </div>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th><input type="checkbox" (change)="toggleAllUnclosed($any($event.target).checked)" /></th>
+              <th>ID</th><th>Type</th><th>Titre</th><th>État</th><th>Assigné</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (item of filteredUnclosedItems; track item.id) {
+              <tr>
+                <td><input type="checkbox" [(ngModel)]="item.selected" /></td>
+                <td class="admin-table__id">{{ item.id }}</td>
+                <td><span class="wi-type">{{ item.type }}</span></td>
+                <td class="admin-table__title">{{ item.title }}</td>
+                <td><span class="wi-state">{{ item.state }}</span></td>
+                <td class="admin-table__assigned">{{ item.assigned_to }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      } @else if (!unclosedLoading && unclosedItems.length === 0 && unclosedPrevPi !== undefined) {
+        <p class="admin-empty">
+          @if (unclosedPrevPi) { ✅ Aucun item non clôturé trouvé dans le PI précédent. }
+          @else { Cliquez sur "Charger les items" pour analyser le PI précédent. }
+        </p>
+      }
+    </div>
+  }
+
+  <!-- ═══ TAB 3 : Chemins parents ═══ -->
+  @if (activeTab === 'parents') {
+    <div class="admin-section">
+      <p class="admin-desc">
+        Liste les <strong>Features / Enablers</strong> parents des stories planifiées dans ce PI
+        dont le chemin d'itération n'est pas encore <code>{{ pi.azdo_iteration_path || '(non configuré)' }}</code>.
+      </p>
+      <div class="admin-actions">
+        <button class="btn btn-check" (click)="checkParentIterations()" [disabled]="parentsLoading">
+          {{ parentsLoading ? '⏳ Chargement…' : '🔍 Analyser' }}
+        </button>
+        @if (parentsItems.length > 0) {
+          <button class="btn btn-exec" (click)="updateParentIterations()" [disabled]="parentsUpdating || !selectedParentIds.length">
+            {{ parentsUpdating ? '⏳ Mise à jour…' : '✎ Mettre à jour (' + selectedParentIds.length + ')' }}
+          </button>
+        }
+      </div>
+
+      @if (parentsError) { <p class="admin-error">{{ parentsError }}</p> }
+
+      @if (parentsResult) {
+        <div class="admin-result" [class.admin-result--ok]="!parentsResult.errors?.length">
+          @if (parentsResult.updated?.length) { <p>✅ {{ parentsResult.updated!.length }} item(s) mis à jour.</p> }
+          @for (e of parentsResult.errors; track $index) { <p class="admin-result__error">❌ #{{ e.id }} : {{ e.error }}</p> }
+        </div>
+      }
+
+      @if (parentsItems.length > 0) {
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th><input type="checkbox" (change)="toggleAllParents($any($event.target).checked)" /></th>
+              <th>ID</th><th>Type</th><th>Titre</th><th>Chemin actuel</th><th>→ Nouveau chemin</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (item of parentsItems; track item.id) {
+              <tr>
+                <td><input type="checkbox" [(ngModel)]="item.selected" /></td>
+                <td class="admin-table__id">{{ item.id }}</td>
+                <td>{{ item.type }}</td>
+                <td class="admin-table__title">{{ item.title }}</td>
+                <td class="admin-table__path">{{ item.current_path }}</td>
+                <td class="admin-table__path admin-table__path--new">{{ item.new_path }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      } @else if (!parentsLoading && parentsItems.length === 0 && parentsResult) {
+        <p class="admin-empty">✅ Tous les chemins parents sont déjà à jour.</p>
+      }
+    </div>
+  }
+
+  <!-- ═══ TAB 4 : Chemins stories ═══ -->
+  @if (activeTab === 'stories') {
+    <div class="admin-section">
+      <p class="admin-desc">
+        Met à jour le chemin d'itération des <strong>stories des blocs Layer 2</strong>
+        vers leur sprint respectif (ex: <code>{{ pi.azdo_iteration_path }}\Sprint 1</code>).
+      </p>
+      <div class="admin-actions">
+        <button class="btn btn-check" (click)="checkStoryIterations()" [disabled]="storiesLoading">
+          {{ storiesLoading ? '⏳ Chargement…' : '🔍 Analyser' }}
+        </button>
+        @if (storiesItems.length > 0) {
+          <button class="btn btn-exec" (click)="updateStoryIterations()" [disabled]="storiesUpdating || !selectedStoryItems.length">
+            {{ storiesUpdating ? '⏳ Mise à jour…' : '✎ Mettre à jour (' + selectedStoryItems.length + ')' }}
+          </button>
+        }
+      </div>
+
+      @if (storiesError) { <p class="admin-error">{{ storiesError }}</p> }
+
+      @if (storiesResult) {
+        <div class="admin-result" [class.admin-result--ok]="!storiesResult.errors?.length">
+          @if (storiesResult.updated?.length) { <p>✅ {{ storiesResult.updated!.length }} story(ies) mises à jour.</p> }
+          @for (e of storiesResult.errors; track $index) { <p class="admin-result__error">❌ #{{ e.id }} : {{ e.error }}</p> }
+        </div>
+      }
+
+      @if (storiesItems.length > 0) {
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th><input type="checkbox" (change)="toggleAllStories($any($event.target).checked)" /></th>
+              <th>ID</th><th>Sprint</th><th>Titre</th><th>Chemin actuel</th><th>→ Chemin cible</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (item of storiesItems; track item.id) {
+              <tr>
+                <td><input type="checkbox" [(ngModel)]="item.selected" /></td>
+                <td class="admin-table__id">{{ item.id }}</td>
+                <td><span class="sprint-badge">{{ sprintLabel(item.sprint_number!) }}</span></td>
+                <td class="admin-table__title">{{ item.title }}</td>
+                <td class="admin-table__path">{{ item.current_path }}</td>
+                <td class="admin-table__path admin-table__path--new">{{ item.new_path }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      } @else if (!storiesLoading && storiesItems.length === 0 && storiesResult) {
+        <p class="admin-empty">✅ Tous les chemins de stories sont déjà à jour.</p>
+      }
+    </div>
+  }
+
+  <!-- ═══ TAB 5 : Hors-Prod ═══ -->
+  @if (activeTab === 'hors-prod') {
+    <div class="admin-section">
+      <p class="admin-desc">
+        Crée des tâches <strong>Hors-Prod</strong> dans AZDO pour chaque membre/sprint,
+        basées sur les blocs Layer 1 du planning.
+        Les 5 types : Cérémonies Agile, Réunions/Divers, Montée en compétence, Gestion des imprévus, Activité PSM (PSM uniquement).
+      </p>
+      <div class="admin-actions">
+        <button class="btn btn-check" (click)="previewHorsProd()" [disabled]="horsProdLoading">
+          {{ horsProdLoading ? '⏳ Chargement…' : '🔍 Prévisualiser' }}
+        </button>
+        @if (horsProdTasks.length > 0) {
+          <button class="btn btn-exec" (click)="createHorsProdTasks()" [disabled]="horsProdCreating || !selectedHorsProdTasks.length">
+            {{ horsProdCreating ? '⏳ Création…' : '✚ Créer (' + selectedHorsProdTasks.length + ' tâches)' }}
+          </button>
+        }
+      </div>
+
+      @if (horsProdError) { <p class="admin-error">{{ horsProdError }}</p> }
+
+      @if (horsProdResult) {
+        <div class="admin-result" [class.admin-result--ok]="!horsProdResult.errors?.length">
+          @if (horsProdResult.created?.length) { <p>✅ {{ horsProdResult.created!.length }} tâche(s) créée(s) dans AZDO.</p> }
+          @for (e of horsProdResult.errors; track $index) { <p class="admin-result__error">❌ {{ e.task }} : {{ e.error }}</p> }
+        </div>
+      }
+
+      @if (horsProdTasks.length > 0) {
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th><input type="checkbox" (change)="toggleAllHorsProd($any($event.target).checked)" /></th>
+              <th>Sprint</th><th>Membre</th><th>Catégorie</th><th>Durée</th><th>Heures</th><th>Chemin itération</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (task of horsProdTasks; track trackByIndex($index)) {
+              <tr>
+                <td><input type="checkbox" [(ngModel)]="task.selected" /></td>
+                <td><span class="sprint-badge">{{ sprintLabel(task.sprint_number) }}</span></td>
+                <td class="admin-table__title">{{ task.member_name }}</td>
+                <td><span class="cat-badge cat-badge--{{ task.category }}">{{ task.category_label }}</span></td>
+                <td>{{ task.duration_days }}j</td>
+                <td>{{ task.hours }}h</td>
+                <td class="admin-table__path">{{ task.iteration_path }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+    </div>
+  }
+
+  <!-- ═══ TAB 6 : Tâches enfants stories ═══ -->
+  @if (activeTab === 'story-tasks') {
+    <div class="admin-section">
+      <p class="admin-desc">
+        Crée une <strong>tâche enfant</strong> dans AZDO pour chaque story planifiée dans ce PI.
+        Le titre reprend celui de la story, l'estimation originale est la somme des jours planifiés (tous membres confondus) × 8h.
+        Les stories ayant déjà une tâche enfant sont pré-décochées.
+      </p>
+      <div class="admin-actions">
+        <button class="btn btn-check" (click)="previewStoryTasks()" [disabled]="storyTasksLoading">
+          {{ storyTasksLoading ? '⏳ Chargement…' : '🔍 Prévisualiser' }}
+        </button>
+        @if (storyTasksItems.length > 0) {
+          <button class="btn btn-exec" (click)="createStoryTasks()" [disabled]="storyTasksCreating || !selectedStoryTasks.length">
+            {{ storyTasksCreating ? '⏳ Création…' : '✚ Créer (' + selectedStoryTasks.length + ' tâches)' }}
+          </button>
+        }
+      </div>
+
+      @if (storyTasksError) { <p class="admin-error">{{ storyTasksError }}</p> }
+
+      @if (storyTasksResult) {
+        <div class="admin-result" [class.admin-result--ok]="!storyTasksResult.errors?.length">
+          @if (storyTasksResult.created?.length) {
+            <p>✅ {{ storyTasksResult.created!.length }} tâche(s) créée(s) dans AZDO.</p>
+          }
+          @for (e of storyTasksResult.errors; track $index) {
+            <p class="admin-result__error">❌ #{{ $any(e).story_id }} {{ $any(e).title }} : {{ $any(e).error }}</p>
+          }
+        </div>
+      }
+
+      @if (storyTasksItems.length > 0) {
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th><input type="checkbox" (change)="toggleAllStoryTasks($any($event.target).checked)" /></th>
+              <th>Story ID</th><th>Type</th><th>Sprint</th><th>Titre</th><th>Jours</th><th>Heures</th><th>Tâche existante</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (task of storyTasksItems; track task.story_id) {
+              <tr [class.admin-table__row--warn]="task.has_existing_task">
+                <td><input type="checkbox" [(ngModel)]="task.selected" /></td>
+                <td class="admin-table__id">{{ task.story_id }}</td>
+                <td>{{ task.type }}</td>
+                <td><span class="sprint-badge">{{ sprintLabel(task.sprint_number) }}</span></td>
+                <td class="admin-table__title">{{ task.title }}</td>
+                <td>{{ task.total_days }}j</td>
+                <td>{{ task.total_hours }}h</td>
+                <td>
+                  @if (task.has_existing_task) {
+                    <span class="badge badge--warn">⚠ Existante</span>
+                  } @else {
+                    <span class="badge badge--ok">✓ Aucune</span>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      } @else if (!storyTasksLoading && storyTasksItems.length === 0 && storyTasksResult !== null) {
+        <p class="admin-empty">✅ Aucune story planifiée trouvée dans ce PI.</p>
+      }
+    </div>
+  }
+
+</div>
+
+<!-- ═══ DIALOG DE CONFIRMATION ═══ -->
+@if (confirmVisible) {
+  <div class="confirm-overlay" (click)="onConfirmCancel()">
+    <div class="confirm-dialog" (click)="$event.stopPropagation()">
+      <div class="confirm-dialog__header">⚠️ Confirmation requise</div>
+      <div class="confirm-dialog__body">
+        <pre class="confirm-dialog__message">{{ confirmMessage }}</pre>
+      </div>
+      <div class="confirm-dialog__actions">
+        <button class="btn btn-exec" (click)="onConfirmOk()">✓ Confirmer</button>
+        <button class="btn btn-cancel" (click)="onConfirmCancel()">Annuler</button>
+      </div>
+    </div>
+  </div>
+}

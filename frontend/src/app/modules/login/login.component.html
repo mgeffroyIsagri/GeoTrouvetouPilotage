@@ -1,0 +1,44 @@
+<div class="login-page">
+  <div class="login-card">
+    <div class="login-header">
+      <span class="login-logo">GeoTrouvetou</span>
+      <span class="login-subtitle">Pilotage</span>
+    </div>
+
+    <form class="login-form" (ngSubmit)="onSubmit()">
+      <div class="field">
+        <label for="username">Identifiant</label>
+        <input
+          id="username"
+          type="text"
+          [(ngModel)]="username"
+          name="username"
+          autocomplete="username"
+          placeholder="admin"
+          [disabled]="loading"
+        />
+      </div>
+
+      <div class="field">
+        <label for="password">Mot de passe</label>
+        <input
+          id="password"
+          type="password"
+          [(ngModel)]="password"
+          name="password"
+          autocomplete="current-password"
+          placeholder="••••••••"
+          [disabled]="loading"
+        />
+      </div>
+
+      @if (error) {
+        <div class="error-msg">{{ error }}</div>
+      }
+
+      <button type="submit" class="btn-login" [disabled]="loading || !username || !password">
+        {{ loading ? 'Connexion…' : 'Se connecter' }}
+      </button>
+    </form>
+  </div>
+</div>

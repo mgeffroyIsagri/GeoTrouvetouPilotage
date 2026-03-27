@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 
+/** Métadonnées statiques d'un sprint au sein d'un PI. */
 export interface SprintInfo {
   number: number;
   label: string;
@@ -7,6 +8,11 @@ export interface SprintInfo {
   workingDays: number;  // = weeks * 5
 }
 
+/**
+ * Configuration des 4 sprints d'un PI GeoTrouvetou.
+ * Durées : S1 = 3 sem, S2 = 3 sem, S3 = 4 sem, IP = 3 sem.
+ * Chaque sprint commence un vendredi.
+ */
 export const SPRINT_CONFIG: SprintInfo[] = [
   { number: 1, label: 'Sprint 1',   weeks: 3, workingDays: 15 },
   { number: 2, label: 'Sprint 2',   weeks: 3, workingDays: 15 },
@@ -14,11 +20,20 @@ export const SPRINT_CONFIG: SprintInfo[] = [
   { number: 4, label: 'IP Sprint',  weeks: 3, workingDays: 15 },
 ];
 
+/**
+ * Utilitaires de manipulation des dates et des positions (`day_offset`) dans les sprints.
+ * La référence temporelle est le `day_offset` : `0.0` = vendredi de début de sprint,
+ * `0.5` = vendredi après-midi, `1.0` = lundi suivant, etc.
+ */
 @Injectable({ providedIn: 'root' })
 export class CalendarService {
 
-  /** Retourne les jours ouvrés d'un sprint.
-   *  Le sprint commence un vendredi. Séquence: ven, lun, mar, mer, jeu, ven, lun... */
+  /**
+   * Retourne la liste ordonnée des jours ouvrés d'un sprint.
+   * Le sprint commence un vendredi. Séquence: ven, lun, mar, mer, jeu, ven, lun…
+   * @param sprintStart Date de début du sprint (doit être un vendredi).
+   * @param weeks Nombre de semaines du sprint.
+   */
   getWorkingDays(sprintStart: Date, weeks: number): Date[] {
     const days: Date[] = [];
     const current = new Date(sprintStart);
@@ -36,28 +51,44 @@ export class CalendarService {
     return days;
   }
 
-  /** Convertit un day_offset en position CSS left (px). */
+  /**
+   * Convertit un `day_offset` en position CSS `left` (px).
+   * @param dayOffset Position dans le sprint (peut être décimale, ex. 0.5 = demi-journée).
+   * @param colWidth Largeur en pixels d'une colonne (= 1 jour ouvré).
+   */
   offsetToPixel(dayOffset: number, colWidth: number): number {
     return dayOffset * colWidth;
   }
 
-  /** Convertit un pixel X (relatif au conteneur) en day_offset, snappé à 0.5. */
+  /**
+   * Convertit un pixel X (relatif au conteneur du planning) en `day_offset`, snappé à 0.5.
+   * @param px Position horizontale en pixels.
+   * @param colWidth Largeur en pixels d'une colonne.
+   * @param maxDays Nombre total de jours ouvrés du sprint (borne supérieure).
+   */
   pixelToOffset(px: number, colWidth: number, maxDays: number): number {
     const raw = px / colWidth;
     const snapped = Math.round(raw * 2) / 2;
     return Math.max(0, Math.min(maxDays - 0.5, snapped));
   }
 
-  /** Formatte un jour ouvré pour l'affichage en en-tête de colonne. */
-  formatDayHeader(date: Date): { shortDay: string; dayNum: string } {
+  /**
+   * Formate un jour ouvré pour l'affichage en en-tête de colonne du planning.
+   * @returns `{ shortDay: 'Lu', dayNum: '07', monthNum: '03' }`
+   */
+  formatDayHeader(date: Date): { shortDay: string; dayNum: string; monthNum: string } {
     const days = ['Di', 'Lu', 'Ma', 'Me', 'Je', 'Ve', 'Sa'];
     return {
       shortDay: days[date.getDay()],
       dayNum: date.getDate().toString().padStart(2, '0'),
+      monthNum: (date.getMonth() + 1).toString().padStart(2, '0'),
     };
   }
 
-  /** Retourne les groupes de semaines pour les séparateurs visuels. */
+  /**
+   * Retourne les groupes de semaines ISO pour les séparateurs visuels du planning.
+   * Chaque groupe indique le libellé de semaine (`S12`) et le nombre de jours ouvrés qu'elle contient.
+   */
   getWeekGroups(workingDays: Date[]): Array<{ label: string; count: number }> {
     const groups: Array<{ label: string; count: number }> = [];
     let week = 0;
@@ -78,6 +109,7 @@ export class CalendarService {
     return groups;
   }
 
+  /** Calcule le numéro de semaine ISO 8601 d'une date. */
   private getWeekNumber(date: Date): number {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
     const dayNum = d.getUTCDay() || 7;
@@ -86,19 +118,28 @@ export class CalendarService {
     return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
   }
 
-  /** Vérifie si une date est le 1er jour d'une nouvelle semaine du sprint (vendredi). */
+  /**
+   * Indique si une date correspond au premier jour d'une nouvelle semaine de sprint.
+   * Dans le calendrier GeoTrouvetou, la semaine de sprint commence le vendredi.
+   */
   isWeekStart(date: Date): boolean {
     return date.getDay() === 5; // vendredi
   }
 
-  /** Calcule la date correspondant à un day_offset dans un sprint. */
+  /**
+   * Calcule la date calendaire correspondant à un `day_offset` dans un sprint.
+   * @returns La date ou `null` si l'offset dépasse la durée du sprint.
+   */
   offsetToDate(sprintStart: Date, weeks: number, offset: number): Date | null {
     const workingDays = this.getWorkingDays(sprintStart, weeks);
     const idx = Math.floor(offset);
     return workingDays[idx] ?? null;
   }
 
-  /** Convertit une date calendaire en day_offset dans le sprint. Retourne -1 si hors sprint. */
+  /**
+   * Convertit une date calendaire en `day_offset` dans un sprint.
+   * @returns L'index (0-based) du jour ouvré, ou `-1` si la date est hors du sprint.
+   */
   dateToOffset(date: Date, workingDays: Date[]): number {
     const iso = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
     return workingDays.findIndex((d) => {
@@ -106,7 +147,7 @@ export class CalendarService {
     });
   }
 
-  /** Retourne la date ISO (YYYY-MM-DD) d'un jour ouvré du sprint. */
+  /** Formate un jour ouvré en chaîne ISO `YYYY-MM-DD`. */
   workingDayToISO(d: Date): string {
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   }

@@ -1,17 +1,31 @@
+"""
+Initialisation de la base de données SQLite et migrations incrémentales.
+
+Ce module expose :
+- ``engine``        : moteur SQLAlchemy (SQLite local ou /home sur Azure)
+- ``SessionLocal``  : fabrique de sessions ORM
+- ``init_db()``     : crée toutes les tables et applique les migrations
+- ``get_db()``      : générateur de session pour l'injection de dépendances FastAPI
+"""
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from typing import Generator
 
 from app.models.base import Base
+from app.models.user import AppUser  # noqa: F401 — garantit la création de la table app_users
+from app.models.train_kpi import TrainTeam, TrainKpiEntry  # noqa: F401 — garantit la création des tables train_kpi
 
-# Sur Azure App Service, WEBSITE_SITE_NAME est défini automatiquement
-# /home est un volume persistant sur Azure → la BDD survit aux redémarrages
+# ── Résolution du chemin de la base de données ────────────────────────────────
+# Sur Azure App Service, WEBSITE_SITE_NAME est défini automatiquement.
+# /home est un volume persistant sur Azure → la BDD survit aux redémarrages.
 import os as _os
 if _os.environ.get("WEBSITE_SITE_NAME"):
     DATABASE_URL = "sqlite:////home/geotrouvetou.db"
 else:
     DATABASE_URL = "sqlite:///./geotrouvetou.db"
 
+# ── Moteur et session ─────────────────────────────────────────────────────────
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False},
@@ -21,12 +35,17 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def init_db() -> None:
+    """Crée toutes les tables ORM (si inexistantes) puis applique les migrations."""
     Base.metadata.create_all(bind=engine)
     _run_migrations()
 
 
 def _run_migrations() -> None:
-    """Migrations légères pour les colonnes ajoutées après la création initiale."""
+    """Migrations légères pour les colonnes ajoutées après la création initiale.
+
+    Chaque instruction ``ALTER TABLE`` est enveloppée dans un try/except pour
+    rester idempotente : SQLite lève une erreur si la colonne existe déjà.
+    """
     with engine.connect() as conn:
         # day_offset dans planning_blocks
         try:
@@ -47,6 +66,13 @@ def _run_migrations() -> None:
         # group_id dans planning_blocks
         try:
             conn.execute(text("ALTER TABLE planning_blocks ADD COLUMN group_id INTEGER"))
+            conn.commit()
+        except Exception:
+            pass
+
+        # comment dans planning_blocks
+        try:
+            conn.execute(text("ALTER TABLE planning_blocks ADD COLUMN comment TEXT"))
             conn.commit()
         except Exception:
             pass
@@ -86,6 +112,13 @@ def _run_migrations() -> None:
                 conn.commit()
             except Exception:
                 pass
+
+        # is_locked sur pi
+        try:
+            conn.execute(text("ALTER TABLE pi ADD COLUMN is_locked INTEGER NOT NULL DEFAULT 0"))
+            conn.commit()
+        except Exception:
+            pass
 
         # business_value + effort sur work_items (Features/Enablers)
         try:
@@ -134,8 +167,46 @@ def _run_migrations() -> None:
         except Exception:
             pass
 
+        # Chiffrement des secrets existants en clair (migration one-shot)
+        try:
+            from app.services.crypto import encrypt_value, is_encrypted, SENSITIVE_KEYS
+            for _key in SENSITIVE_KEYS:
+                row = conn.execute(
+                    text("SELECT value FROM app_settings WHERE key = :k"), {"k": _key}
+                ).fetchone()
+                if row and row[0] and not is_encrypted(row[0]):
+                    conn.execute(
+                        text("UPDATE app_settings SET value = :v WHERE key = :k"),
+                        {"v": encrypt_value(row[0]), "k": _key},
+                    )
+            conn.commit()
+        except Exception:
+            pass
+
+        # Création de l'utilisateur admin par défaut (si aucun utilisateur n'existe)
+        try:
+            import bcrypt as _bcrypt_lib
+            count = conn.execute(text("SELECT COUNT(*) FROM app_users")).fetchone()[0]
+            if count == 0:
+                _hashed = _bcrypt_lib.hashpw(b"admin", _bcrypt_lib.gensalt()).decode()
+                conn.execute(
+                    text("INSERT INTO app_users (username, hashed_password) VALUES (:u, :h)"),
+                    {"u": "admin", "h": _hashed},
+                )
+                conn.commit()
+        except Exception:
+            pass
+
 
 def get_db() -> Generator[Session, None, None]:
+    """Générateur de session SQLAlchemy pour l'injection de dépendances FastAPI.
+
+    Usage::
+
+        @router.get("/example")
+        def my_endpoint(db: Session = Depends(get_db)):
+            ...
+    """
     db = SessionLocal()
     try:
         yield db

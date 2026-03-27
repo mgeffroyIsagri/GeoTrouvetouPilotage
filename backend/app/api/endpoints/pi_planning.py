@@ -19,6 +19,7 @@ class BlockCreate(BaseModel):
     layer: int = 1
     work_item_id: int | None = None
     group_id: int | None = None
+    comment: str | None = None
 
 
 class BlockUpdate(BaseModel):
@@ -26,6 +27,7 @@ class BlockUpdate(BaseModel):
     duration_days: float | None = None
     work_item_id: int | None = None
     is_locked: bool | None = None
+    comment: str | None = None
 
 
 class BlockGroupCreate(BaseModel):
@@ -46,6 +48,7 @@ class BlockResponse(BaseModel):
     is_locked: bool
     work_item_id: int | None
     group_id: int | None
+    comment: str | None
 
     class Config:
         from_attributes = True
@@ -67,6 +70,7 @@ def get_blocks_for_sprint(pi_id: int, sprint_number: int, db: Session = Depends(
 
 @router.post("/", response_model=BlockResponse, status_code=201)
 def create_block(payload: BlockCreate, db: Session = Depends(get_db)):
+    """Crée un bloc de planning individuel (Layer 1 ou Layer 2) pour un membre d'équipe."""
     from app.models.iteration import Iteration
     iteration = db.query(Iteration).filter(
         Iteration.pi_id == payload.pi_id,
@@ -82,6 +86,10 @@ def create_block(payload: BlockCreate, db: Session = Depends(get_db)):
 
 @router.put("/{block_id}", response_model=BlockResponse)
 def update_block(block_id: int, payload: BlockUpdate, db: Session = Depends(get_db)):
+    """Met à jour un bloc (position, durée, work_item, commentaire).
+    Si work_item_id est modifié et que le bloc appartient à un groupe, la valeur
+    est propagée à tous les membres du groupe en une seule requête.
+    """
     block = db.query(PlanningBlock).filter(PlanningBlock.id == block_id).first()
     if not block:
         raise HTTPException(status_code=404, detail="Bloc non trouvé")
@@ -103,6 +111,9 @@ def update_block(block_id: int, payload: BlockUpdate, db: Session = Depends(get_
 
 @router.delete("/{block_id}", status_code=204)
 def delete_block(block_id: int, db: Session = Depends(get_db)):
+    """Supprime un bloc. Si le bloc fait partie d'un groupe (story multi-sprint),
+    tous les blocs du groupe sont supprimés ensemble.
+    """
     block = db.query(PlanningBlock).filter(PlanningBlock.id == block_id).first()
     if not block:
         raise HTTPException(status_code=404, detail="Bloc non trouvé")
@@ -146,11 +157,19 @@ def create_block_group(payload: BlockGroupCreate, db: Session = Depends(get_db))
 
 
 @router.post("/pi/{pi_id}/generate", status_code=201)
-def generate_planning(pi_id: int, db: Session = Depends(get_db)):
-    """Supprime les blocs auto-générés et régénère depuis les matrices de capacité."""
+def generate_planning(
+    pi_id: int,
+    team_member_id: int | None = None,
+    sprint_number: int | None = None,
+    db: Session = Depends(get_db),
+):
+    """Supprime les blocs auto-générés et régénère depuis les matrices de capacité.
+
+    Paramètres optionnels pour cibler un membre et/ou un sprint spécifique.
+    """
     from app.services.capacity import generate_pi_planning
     try:
-        generate_pi_planning(pi_id, db)
+        generate_pi_planning(pi_id, db, team_member_id=team_member_id, sprint_number=sprint_number)
         return {"status": "ok", "message": "Calendrier capacitaire généré"}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -162,22 +181,29 @@ def reset_pi(
     reset_leaves: bool = True,
     reset_stories: bool = True,
     reset_layer1: bool = True,
+    team_member_id: int | None = None,
     db: Session = Depends(get_db),
 ):
-    """Supprime sélectivement blocs et congés du PI selon les paramètres."""
+    """Supprime sélectivement blocs et congés du PI selon les paramètres.
+
+    Si ``team_member_id`` est fourni, la suppression ne concerne que ce membre.
+    """
     from app.models.leave import Leave
     if reset_layer1:
-        db.query(PlanningBlock).filter(
-            PlanningBlock.pi_id == pi_id,
-            PlanningBlock.layer == 1,
-        ).delete()
+        q = db.query(PlanningBlock).filter(PlanningBlock.pi_id == pi_id, PlanningBlock.layer == 1)
+        if team_member_id is not None:
+            q = q.filter(PlanningBlock.team_member_id == team_member_id)
+        q.delete()
     if reset_stories:
-        db.query(PlanningBlock).filter(
-            PlanningBlock.pi_id == pi_id,
-            PlanningBlock.layer == 2,
-        ).delete()
+        q = db.query(PlanningBlock).filter(PlanningBlock.pi_id == pi_id, PlanningBlock.layer == 2)
+        if team_member_id is not None:
+            q = q.filter(PlanningBlock.team_member_id == team_member_id)
+        q.delete()
     if reset_leaves:
-        db.query(Leave).filter(Leave.pi_id == pi_id).delete()
+        q = db.query(Leave).filter(Leave.pi_id == pi_id)
+        if team_member_id is not None:
+            q = q.filter(Leave.team_member_id == team_member_id)
+        q.delete()
     db.commit()
 
 
@@ -188,25 +214,31 @@ def reset_sprint(
     reset_leaves: bool = True,
     reset_stories: bool = True,
     reset_layer1: bool = True,
+    team_member_id: int | None = None,
     db: Session = Depends(get_db),
 ):
-    """Supprime sélectivement blocs et congés d'un sprint selon les paramètres."""
+    """Supprime sélectivement blocs et congés d'un sprint selon les paramètres.
+
+    Si ``team_member_id`` est fourni, la suppression ne concerne que ce membre.
+    """
     from app.models.leave import Leave
     if reset_layer1:
-        db.query(PlanningBlock).filter(
-            PlanningBlock.pi_id == pi_id,
-            PlanningBlock.sprint_number == sprint_number,
-            PlanningBlock.layer == 1,
-        ).delete()
+        q = db.query(PlanningBlock).filter(
+            PlanningBlock.pi_id == pi_id, PlanningBlock.sprint_number == sprint_number, PlanningBlock.layer == 1,
+        )
+        if team_member_id is not None:
+            q = q.filter(PlanningBlock.team_member_id == team_member_id)
+        q.delete()
     if reset_stories:
-        db.query(PlanningBlock).filter(
-            PlanningBlock.pi_id == pi_id,
-            PlanningBlock.sprint_number == sprint_number,
-            PlanningBlock.layer == 2,
-        ).delete()
+        q = db.query(PlanningBlock).filter(
+            PlanningBlock.pi_id == pi_id, PlanningBlock.sprint_number == sprint_number, PlanningBlock.layer == 2,
+        )
+        if team_member_id is not None:
+            q = q.filter(PlanningBlock.team_member_id == team_member_id)
+        q.delete()
     if reset_leaves:
-        db.query(Leave).filter(
-            Leave.pi_id == pi_id,
-            Leave.sprint_number == sprint_number,
-        ).delete()
+        q = db.query(Leave).filter(Leave.pi_id == pi_id, Leave.sprint_number == sprint_number)
+        if team_member_id is not None:
+            q = q.filter(Leave.team_member_id == team_member_id)
+        q.delete()
     db.commit()

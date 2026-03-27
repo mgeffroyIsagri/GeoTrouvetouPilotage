@@ -7,7 +7,7 @@ Elle remplace les outils Klaxoon et scripts Python ad hoc par une interface cent
 
 ## Fonctionnalités
 
-- 📅 **PI Planning** — Calendrier capacitaire avec génération automatique des briques d'activité et ajustement manuel (drag & drop)
+- 📅 **PI Planning** — Calendrier capacitaire responsive avec génération automatique des briques d'activité, ajustement manuel (drag & drop), panneau de détail chronologique par collaborateur, sélection visuelle des stories multi-sprint, impression / export PDF sélectif (sprint × collaborateurs)
 - 🔍 **PBR / Refinement** — Suivi des sessions de Product Backlog Refinement avec votes, notes DOR et analyse IA (DoR). Groupement parent/enfant avec indentation. Responsable de refinement, plan d'action, déprioritisation, copie de session, synchronisation des stories enfants AZDO
 - 📊 **Suivi & KPIs** — Tableau des tâches par story/feature, graphiques estimation vs réalisé, KPIs sprint par collaborateur (capacité vs réalisé par catégorie), saisie manuelle des capacités, analyses IA de productivité individuelles sauvegardables
 - 🕓 **Historique** — Consultation et comparaison des PI passés, export PDF *(à venir)*
@@ -134,6 +134,7 @@ GeoTrouvetouPilotage/
 - [x] **M3** — Module PI Planning (calendrier + capacité + drag & drop)
 - [x] **M4** — Module PBR / Refinement (votes, analyse IA DoR, groupement, responsable, copie, sync, logs)
 - [x] **M5** — Module Suivi & KPIs (tâches, graphiques, KPIs sprint, capacités manuelles, analyse IA productivité)
+- [x] **M5.1** — PI Planning : calendrier responsive (ResizeObserver), panneau de détail par collaborateur, infobulle capacité position fixe, sélection visuelle story multi-sprint, impression / export PDF
 - [ ] **M6** — Historique inter-PI + Export PDF
 
 ---

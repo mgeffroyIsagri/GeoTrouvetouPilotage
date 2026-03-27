@@ -32,3 +32,6 @@ Thumbs.db
 # Deploy artifacts
 deploy.zip
 backend/static/
+
+# Clé de chiffrement applicative (générée automatiquement)
+.secret_key

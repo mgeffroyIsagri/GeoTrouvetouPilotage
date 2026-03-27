@@ -1,0 +1,345 @@
+<div class="train-kpi-page">
+
+  <!-- ── Toolbar ──────────────────────────────────────────────────────────── -->
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <h1 class="page-title">KPI du Train 🚂</h1>
+    </div>
+    <div class="toolbar-right">
+      <select class="pi-select" [(ngModel)]="selectedPiId" (change)="onPiChange()">
+        @for (pi of piList; track pi.id) {
+          <option [value]="pi.id">{{ pi.name }}{{ pi.is_active ? ' ★' : '' }}</option>
+        }
+      </select>
+    </div>
+  </div>
+
+  <!-- ── Onglets ──────────────────────────────────────────────────────────── -->
+  <div class="tabs">
+    <button class="tab" [class.tab--active]="activeTab === 'kpi'" (click)="setTab('kpi')">
+      📊 KPIs
+    </button>
+    <button class="tab" [class.tab--active]="activeTab === 'teams'" (click)="setTab('teams')">
+      ⚙️ Équipes
+    </button>
+    <button class="tab" [class.tab--active]="activeTab === 'evolution'" (click)="setTab('evolution')">
+      📈 Évolution
+    </button>
+  </div>
+
+  <!-- ── Onglet KPI ────────────────────────────────────────────────────────── -->
+  @if (activeTab === 'kpi') {
+    <div class="tab-content">
+
+      <!-- Barre d'actions KPI -->
+      <div class="kpi-toolbar">
+        <div class="kpi-toolbar-left">
+          @if (activePI) {
+            <span class="pi-label">{{ activePI.name }}</span>
+          }
+          @if (!activePI) {
+            <span class="pi-label empty">Aucun PI sélectionné</span>
+          }
+        </div>
+        <div class="kpi-toolbar-right">
+          <button class="btn btn-primary"
+                  [disabled]="analyzing || !selectedPiId"
+                  (click)="analyzeAll()">
+            @if (analyzing) {
+              <span class="spinner"></span> Analyse en cours…
+            } @else {
+              🔄 Analyser tout le PI
+            }
+          </button>
+        </div>
+      </div>
+
+      <!-- Barre de progression analyse -->
+      @if (analyzeProgress) {
+        <div class="analyze-progress">
+          <div class="analyze-progress-header">
+            <span class="analyze-team-label">
+              Équipe <strong>{{ analyzeProgress.teamName }}</strong>
+              <span class="analyze-team-counter">({{ analyzeProgress.teamIndex + 1 }}/{{ analyzeProgress.teamTotal }})</span>
+            </span>
+            @if (analyzeProgress.total > 0) {
+              <span class="analyze-commit-counter">
+                {{ analyzeProgress.current }} / {{ analyzeProgress.total }} commits
+                @if (analyzeProgress.repo) { — <em>{{ analyzeProgress.repo }}</em> }
+              </span>
+            } @else {
+              <span class="analyze-commit-counter">Initialisation…</span>
+            }
+          </div>
+          <div class="analyze-progress-track">
+            <div class="analyze-progress-fill"
+                 [style.width.%]="analyzeProgress.total > 0 ? (analyzeProgress.current / analyzeProgress.total) * 100 : 0">
+            </div>
+          </div>
+        </div>
+      }
+
+      <!-- Bandeau message analyse (erreurs, avertissements, succès) -->
+      @if (analysisMessage) {
+        <div class="analysis-message" [class]="'analysis-message--' + analysisMessage.type">
+          <span class="analysis-message-icon">
+            @if (analysisMessage.type === 'error') { ❌ }
+            @if (analysisMessage.type === 'warning') { ⚠️ }
+            @if (analysisMessage.type === 'info') { ✅ }
+          </span>
+          <pre class="analysis-message-text">{{ analysisMessage.text }}</pre>
+          <button class="analysis-message-close" (click)="analysisMessage = null">✕</button>
+        </div>
+      }
+
+      <!-- État chargement -->
+      @if (loadingKpi) {
+        <div class="loading-state">Chargement des KPIs…</div>
+      }
+
+      <!-- Tableau KPI -->
+      @if (!loadingKpi && kpiEntries.length > 0) {
+        <div class="table-wrapper">
+          <table class="kpi-table">
+            <thead>
+              <tr>
+                <th>Équipe</th>
+                <th class="col-num">Commits</th>
+                <th class="col-num">Fichiers modifiés</th>
+                <th class="col-num">Lignes ajoutées</th>
+                <th class="col-num">Lignes supprimées</th>
+                <th class="col-num">Lignes nettes</th>
+                <th class="col-num">Capacité (j)</th>
+                <th class="col-num">Ratio lignes/j</th>
+                <th>Dernière analyse</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (entry of kpiEntries; track entry.id) {
+                <tr>
+                  <!-- Nom équipe avec pastille couleur -->
+                  <td>
+                    <span class="kpi-team-badge"
+                          [style.background-color]="entry.team.color ?? '#1a73e8'">
+                    </span>
+                    <span class="team-name">{{ entry.team.name }}</span>
+                    @if (entry.is_partial) {
+                      <span class="kpi-partial">partiel</span>
+                    }
+                  </td>
+                  <td class="col-num">{{ entry.commits_count }}</td>
+                  <td class="col-num">{{ entry.files_changed }}</td>
+                  <td class="col-num kpi-positive">+{{ entry.lines_added }}</td>
+                  <td class="col-num kpi-negative">-{{ entry.lines_deleted }}</td>
+                  <td class="col-num"
+                      [class.kpi-positive]="netLines(entry) > 0"
+                      [class.kpi-negative]="netLines(entry) < 0">
+                    {{ netLines(entry) > 0 ? '+' : '' }}{{ netLines(entry) }}
+                  </td>
+                  <!-- Capacité éditable inline -->
+                  <td class="col-num">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      class="capacity-input"
+                      [(ngModel)]="editingCapacity[entry.id]"
+                      (blur)="saveCapacity(entry)"
+                    />
+                  </td>
+                  <td class="col-num">
+                    @if (ratioLinesPerDay(entry) !== null) {
+                      {{ ratioLinesPerDay(entry) }}
+                    } @else {
+                      <span class="text-muted">—</span>
+                    }
+                  </td>
+                  <td class="col-date">
+                    @if (formatAnalyzedAt(entry)) {
+                      <span class="analyzed-at">{{ formatAnalyzedAt(entry) }}</span>
+                    } @else {
+                      <span class="text-muted">Non analysé</span>
+                    }
+                  </td>
+                  <td>
+                    <button class="btn btn-secondary btn-sm"
+                            [disabled]="analyzingTeamId === entry.team_id"
+                            (click)="analyzeTeam(entry.team_id)">
+                      @if (analyzingTeamId === entry.team_id) {
+                        <span class="spinner spinner--sm"></span>
+                      } @else {
+                        🔄
+                      }
+                    </button>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+
+      <!-- État vide -->
+      @if (!loadingKpi && kpiEntries.length === 0 && selectedPiId) {
+        <div class="empty-state">
+          <p>Aucune donnée KPI pour ce PI.</p>
+          <p>Configurez des équipes dans l'onglet <strong>Équipes</strong> puis cliquez sur <strong>Analyser tout le PI</strong>.</p>
+        </div>
+      }
+
+      @if (!selectedPiId) {
+        <div class="empty-state">Sélectionnez un PI pour afficher les KPIs.</div>
+      }
+
+    </div>
+  }
+
+  <!-- ── Onglet Équipes ────────────────────────────────────────────────────── -->
+  @if (activeTab === 'teams') {
+    <div class="tab-content">
+
+      <div class="teams-toolbar">
+        <h2 class="section-title">Configuration des équipes du train</h2>
+        <button class="btn btn-primary" (click)="openCreateTeamForm()">
+          + Ajouter une équipe
+        </button>
+      </div>
+
+      <!-- Formulaire création / édition -->
+      @if (showTeamForm) {
+        <div class="team-form">
+          <h3 class="team-form-title">
+            {{ editingTeam ? 'Modifier l\'équipe' : 'Nouvelle équipe' }}
+          </h3>
+          <div class="form-row">
+            <label class="form-label">Nom</label>
+            <input type="text" class="form-input" [(ngModel)]="formName" placeholder="Ex : Équipe Alpha" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">Repos AZDO <span class="form-hint">(un par ligne)</span></label>
+            <textarea class="form-textarea" rows="4" [(ngModel)]="formRepos"
+                      placeholder="RepoFrontend&#10;RepoBackend&#10;RepoShared"></textarea>
+          </div>
+          <div class="form-row">
+            <label class="form-label">Filtre branche</label>
+            <input type="text" class="form-input" [(ngModel)]="formBranch" placeholder="main" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">Couleur</label>
+            <div class="color-row">
+              <input type="color" class="form-color" [(ngModel)]="formColor" />
+              <span class="color-value">{{ formColor }}</span>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" (click)="submitTeamForm()"
+                    [disabled]="!formName.trim()">
+              {{ editingTeam ? 'Enregistrer' : 'Créer' }}
+            </button>
+            <button class="btn btn-secondary" (click)="cancelTeamForm()">Annuler</button>
+          </div>
+        </div>
+      }
+
+      <!-- Liste des équipes -->
+      @if (loadingTeams) {
+        <div class="loading-state">Chargement des équipes…</div>
+      }
+
+      @if (!loadingTeams && teams.length === 0) {
+        <div class="empty-state">
+          Aucune équipe configurée. Cliquez sur <strong>Ajouter une équipe</strong> pour commencer.
+        </div>
+      }
+
+      @if (!loadingTeams && teams.length > 0) {
+        <div class="teams-list">
+          @for (team of teams; track team.id) {
+            <div class="team-card">
+              <div class="team-card-header">
+                <span class="kpi-team-badge"
+                      [style.background-color]="team.color ?? '#1a73e8'">
+                </span>
+                <span class="team-card-name">{{ team.name }}</span>
+                <span class="team-branch-badge">{{ team.branch_filter }}</span>
+              </div>
+              <div class="team-card-repos">
+                @for (repo of team.azdo_repos; track repo) {
+                  <span class="repo-tag">{{ repo }}</span>
+                }
+                @if (!team.azdo_repos || team.azdo_repos.length === 0) {
+                  <span class="text-muted">Aucun repo configuré</span>
+                }
+              </div>
+              <div class="team-card-actions">
+                <button class="btn btn-secondary btn-sm" (click)="openEditTeamForm(team)">
+                  ✏️ Modifier
+                </button>
+                <button class="btn btn-danger btn-sm" (click)="deleteTeam(team)">
+                  🗑️ Supprimer
+                </button>
+              </div>
+            </div>
+          }
+        </div>
+      }
+
+    </div>
+  }
+
+  <!-- ── Onglet Évolution ──────────────────────────────────────────────────── -->
+  @if (activeTab === 'evolution') {
+    <div class="tab-content">
+
+      <h2 class="section-title">Évolution des lignes nettes par PI</h2>
+
+      @if (analyzedPIs.length < 2) {
+        <div class="empty-state">
+          <p>Au moins 2 PIs analysés sont nécessaires pour afficher l'évolution.</p>
+          <p>Actuellement : <strong>{{ analyzedPIs.length }}</strong> PI(s) avec des données.</p>
+        </div>
+      }
+
+      @if (analyzedPIs.length >= 2 && teams.length > 0) {
+        <div class="table-wrapper">
+          <table class="evolution-table">
+            <thead>
+              <tr>
+                <th>Équipe</th>
+                @for (pi of analyzedPIs; track pi.id) {
+                  <th class="col-num">{{ pi.name }}</th>
+                }
+              </tr>
+            </thead>
+            <tbody>
+              @for (team of teams; track team.id) {
+                <tr>
+                  <td>
+                    <span class="kpi-team-badge"
+                          [style.background-color]="team.color ?? '#1a73e8'">
+                    </span>
+                    {{ team.name }}
+                  </td>
+                  @for (pi of analyzedPIs; track pi.id) {
+                    <td class="col-num"
+                        [class.kpi-positive]="(getEvolutionNetLines(team.id, pi.id) ?? 0) > 0"
+                        [class.kpi-negative]="(getEvolutionNetLines(team.id, pi.id) ?? 0) < 0">
+                      @if (getEvolutionNetLines(team.id, pi.id) !== null) {
+                        {{ (getEvolutionNetLines(team.id, pi.id) ?? 0) > 0 ? '+' : '' }}{{ getEvolutionNetLines(team.id, pi.id) }}
+                      } @else {
+                        <span class="text-muted">—</span>
+                      }
+                    </td>
+                  }
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+
+    </div>
+  }
+
+</div>

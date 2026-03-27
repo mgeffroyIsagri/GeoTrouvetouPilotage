@@ -17,6 +17,19 @@
     border: 2px solid rgba(255,255,255,0.4);
   }
 
+  &--selected {
+    opacity: 1 !important;
+    border: 2px solid #fff !important;
+    box-shadow: 0 0 0 2px #1a73e8, 0 2px 8px rgba(26,115,232,0.4) !important;
+    z-index: 5 !important;
+  }
+
+  // Bloc orphelin (layer 2 sans work item) — bordure orange pointillée
+  &--orphan {
+    border: 2px dashed #f59e0b !important;
+    box-shadow: inset 0 0 0 1px rgba(245,158,11,0.3);
+  }
+
   // Catégories — couleurs (reprend les CSS vars)
   &--stories_dev     { background: var(--block-stories-dev); z-index: 2; }
   &--stories_qa      { background: var(--block-stories-qa);  z-index: 2; }
@@ -45,9 +58,8 @@
 
   .delete-icon {
     position: absolute;
-    right: 10px;
-    top: 50%;
-    transform: translateY(-50%);
+    right: 3px;
+    top: 2px;
     font-size: 9px;
     line-height: 1;
     cursor: pointer;

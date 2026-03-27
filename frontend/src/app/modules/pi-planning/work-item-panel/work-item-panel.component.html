@@ -18,7 +18,11 @@
   @if (workItem && !showPicker) {
     <div class="wi-detail">
       <div class="wi-meta">
-        <span class="wi-id">#{{ workItem.id }}</span>
+        @if (buildAzdoUrl(workItem.id)) {
+          <a class="wi-id wi-id--link" [href]="buildAzdoUrl(workItem.id)" target="_blank" rel="noopener" title="Ouvrir dans Azure DevOps">#{{ workItem.id }} ↗</a>
+        } @else {
+          <span class="wi-id">#{{ workItem.id }}</span>
+        }
         <span class="wi-type">{{ workItem.type }}</span>
         @if (workItem.state) {
           <span class="wi-state">{{ workItem.state }}</span>
@@ -53,8 +57,36 @@
     </div>
   }
 
+  @if (!showPicker) {
+    <div class="comment-section">
+      <label class="comment-label">Commentaire</label>
+      <textarea
+        class="comment-input"
+        [(ngModel)]="comment"
+        placeholder="Note sur cette brique…"
+        rows="3"
+        (blur)="saveComment()"
+      ></textarea>
+    </div>
+  }
+
   @if (showPicker) {
     <div class="picker">
+      <div class="picker-filter">
+        <label class="filter-checkbox">
+          <input type="checkbox" [(ngModel)]="useIterationFilter" (change)="onIterationFilterChange()" />
+          Filtrer par iteration
+        </label>
+        @if (useIterationFilter) {
+          <input
+            class="picker-iteration"
+            type="text"
+            placeholder="Iteration path…"
+            [(ngModel)]="iterationFilter"
+            (input)="onIterationFilterChange()"
+          />
+        }
+      </div>
       <input
         class="picker-search"
         type="text"

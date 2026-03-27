@@ -121,6 +121,12 @@ def get_sync_logs(limit: int = 20, db: Session = Depends(get_db)):
 
 
 def _build_wi_query(db: Session, type: str | None, state: str | None, search: str | None, iteration_path: str | None):
+    """Construit la requête SQLAlchemy WorkItem filtrée.
+    - type : liste de types séparés par virgule (ex: "User Story,Enabler Story")
+    - state : liste d'états séparés par virgule
+    - search : texte libre — recherche par ID exact si numérique, sinon LIKE sur le titre
+    - iteration_path : filtre contient (LIKE) sur le chemin d'itération
+    """
     q = db.query(WorkItem)
     if type:
         types = [t.strip() for t in type.split(",")]
@@ -129,7 +135,11 @@ def _build_wi_query(db: Session, type: str | None, state: str | None, search: st
         states = [s.strip() for s in state.split(",")]
         q = q.filter(WorkItem.state.in_(states))
     if search:
-        q = q.filter(WorkItem.title.ilike(f"%{search}%"))
+        from sqlalchemy import or_
+        if search.strip().isdigit():
+            q = q.filter(or_(WorkItem.id == int(search.strip()), WorkItem.title.ilike(f"%{search}%")))
+        else:
+            q = q.filter(WorkItem.title.ilike(f"%{search}%"))
     if iteration_path:
         q = q.filter(WorkItem.iteration_path.ilike(f"%{iteration_path}%"))
     return q
@@ -149,10 +159,18 @@ def get_work_items(
     state: str | None = Query(None),
     search: str | None = Query(None),
     iteration_path: str | None = Query(None, description="Filtre sur l'iteration path (contient)"),
+    ids: str | None = Query(None, description="Liste d'IDs séparés par virgule"),
     skip: int = 0,
-    limit: int = 50,
+    limit: int = 200,
     db: Session = Depends(get_db),
 ):
+    """Liste les Work Items avec filtres optionnels.
+    Si `ids` est fourni, retourne directement les items correspondants (bulk fetch pour tooltips).
+    Sinon, applique les filtres type/state/search/iteration_path avec pagination.
+    """
+    if ids:
+        id_list = [int(i.strip()) for i in ids.split(",") if i.strip().isdigit()]
+        return db.query(WorkItem).filter(WorkItem.id.in_(id_list)).all()
     q = _build_wi_query(db, type, state, search, iteration_path)
     return q.order_by(WorkItem.id).offset(skip).limit(limit).all()
 
@@ -165,6 +183,7 @@ def count_work_items(
     iteration_path: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
+    """Retourne le nombre de Work Items correspondant aux filtres (utilisé pour la pagination du picker)."""
     return {"count": _build_wi_query(db, type, state, search, iteration_path).count()}
 
 

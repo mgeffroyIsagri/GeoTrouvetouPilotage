@@ -1,8 +1,20 @@
+"""Mapping des exceptions httpx vers des messages d'erreur lisibles pour l'utilisateur."""
+
 import httpx
 
 
 def map_azdo_error(exc: Exception) -> str:
-    """Convertit une exception AZDO en message lisible."""
+    """Convertit une exception AZDO en message d'erreur lisible.
+
+    Gère les cas les plus courants : mauvais PAT (401), permissions insuffisantes
+    (403), ressource introuvable (404), timeout et erreur réseau.
+
+    Args:
+        exc: Exception levée lors d'un appel AZDO.
+
+    Returns:
+        Message d'erreur en français, prêt à afficher dans l'interface.
+    """
     if isinstance(exc, httpx.HTTPStatusError):
         status = exc.response.status_code
         if status == 401:

@@ -7,6 +7,11 @@ $WEB_APP        = "GeotrouvetouWeb"
 $RESOURCE_GROUP = "rg-geotrouvetou"
 $ROOT           = $PSScriptRoot
 
+# Résolution de l'Azure CLI (az n'est pas toujours dans le PATH PowerShell)
+$AZ = (Get-Command az -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue)
+if (-not $AZ) { $AZ = "C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd" }
+if (-not (Test-Path $AZ)) { Write-Error "Azure CLI introuvable. Installez-le depuis https://aka.ms/installazurecliwindows"; exit 1 }
+
 # --- 1. Build Angular (production) ---
 Write-Host "Build Angular (production)..." -ForegroundColor Cyan
 Set-Location "$ROOT\frontend"
@@ -31,9 +36,23 @@ New-Item -ItemType Directory $tempDir | Out-Null
 # robocopy est integre a Windows et gere parfaitement les exclusions
 robocopy "$ROOT\backend" $tempDir /E /XD ".venv" "__pycache__" ".git" /XF "*.pyc" | Out-Null
 
-$zipPath = "$ROOT\deploy.zip"
-if (Test-Path $zipPath) { Remove-Item $zipPath }
-Compress-Archive -Path "$tempDir\*" -DestinationPath $zipPath
+$zipPath     = "$ROOT\deploy.zip"
+$zipPathTemp = "$ROOT\deploy_new.zip"
+if (Test-Path $zipPathTemp) { Remove-Item $zipPathTemp -Force }
+
+# Utiliser ZipFile .NET pour avoir des forward slashes (compatibles Linux)
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = [System.IO.Compression.ZipFile]::Open($zipPathTemp, 'Create')
+Get-ChildItem $tempDir -Recurse -File | ForEach-Object {
+    $relativePath = $_.FullName.Substring($tempDir.Length + 1).Replace('\', '/')
+    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $relativePath) | Out-Null
+}
+$zip.Dispose()
+
+# Remplacer l'ancien zip
+if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+Rename-Item $zipPathTemp $zipPath
 
 Remove-Item $tempDir -Recurse -Force
 
@@ -42,7 +61,7 @@ Write-Host "   OK -> deploy.zip ($sizeMB MB)"
 
 # --- 4. Deploiement Azure ---
 Write-Host "Deploiement sur Azure App Service..." -ForegroundColor Cyan
-az webapp deploy `
+& $AZ webapp deploy `
   --name $WEB_APP `
   --resource-group $RESOURCE_GROUP `
   --src-path $zipPath `

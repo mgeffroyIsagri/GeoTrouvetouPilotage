@@ -2,11 +2,16 @@
   display: flex;
   height: 100vh;
   overflow: hidden;
+
+  main {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
 }
 
 .app-content {
-  flex: 1;
-  overflow: auto;
   padding: 24px;
   background-color: var(--color-background);
+  height: 100%;
 }

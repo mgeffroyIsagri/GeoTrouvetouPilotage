@@ -10,6 +10,7 @@ from app.models.app_settings import AppSettings
 from app.models.sync_log import SyncLog
 from app.models.llm_log import LLMLog
 from app.models.sprint_capacity import SprintCapacity
+from app.models.train_kpi import TrainTeam, TrainKpiEntry
 
 __all__ = [
     "Base",
@@ -25,4 +26,6 @@ __all__ = [
     "SyncLog",
     "LLMLog",
     "SprintCapacity",
+    "TrainTeam",
+    "TrainKpiEntry",
 ]

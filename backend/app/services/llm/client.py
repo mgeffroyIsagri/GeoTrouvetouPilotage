@@ -1,3 +1,15 @@
+"""Client LLM multi-provider (OpenAI, Anthropic, Azure AI Foundry).
+
+Ce module expose :
+- ``LLMClient``               : client principal, configuré depuis ``app_settings``
+- ``SYSTEM_PROMPT_ENABLER``   : prompt système pour l'analyse DoR des Enablers/Features
+- ``SYSTEM_PROMPT_STORY``     : prompt système pour l'analyse DoR des stories
+- ``SYSTEM_PROMPT_PRODUCTIVITY``: prompt système pour les rapports de productivité sprint
+
+Les prompts sont en français et produisent une sortie texte structurée (pas de JSON)
+directement copiable dans Word.
+"""
+
 import re
 from sqlalchemy.orm import Session
 from app.models.app_settings import AppSettings
@@ -358,12 +370,25 @@ def _extract_note(text: str) -> int:
 
 
 class LLMClient:
-    """Client LLM configurable (OpenAI, Anthropic ou Azure)."""
+    """Client LLM configurable (OpenAI, Anthropic ou Azure AI Foundry).
+
+    La configuration est lue depuis la table ``app_settings`` :
+    - ``llm_provider`` : ``"openai"``, ``"anthropic"`` ou ``"azure"`` (défaut : ``"anthropic"``)
+    - ``llm_model``    : identifiant du modèle (défaut : ``"claude-sonnet-4-6"``)
+    - ``llm_api_key``  : clé API (chiffrée en base)
+    - ``llm_endpoint`` : URL Azure AI Foundry (requis uniquement si provider = ``"azure"``)
+
+    Args:
+        db: Session SQLAlchemy pour lire les paramètres applicatifs.
+    """
 
     def __init__(self, db: Session):
+        from app.services.crypto import decrypt_value, SENSITIVE_KEYS
+
         def get(key: str) -> str | None:
             row = db.query(AppSettings).filter(AppSettings.key == key).first()
-            return row.value if row else None
+            value = row.value if row else None
+            return decrypt_value(value) if key in SENSITIVE_KEYS else value
 
         self.provider = get("llm_provider") or "anthropic"
         self.model = get("llm_model") or "claude-sonnet-4-6"
@@ -389,6 +414,16 @@ Notes PBR des participants :
         return await self._call_text(SYSTEM_PROMPT_PRODUCTIVITY, user_message, max_tokens=8192)
 
     async def _call_text(self, system: str, user_message: str, max_tokens: int = 4096) -> str:
+        """Dispatche l'appel vers le provider configuré et retourne le texte généré.
+
+        Args:
+            system:       Prompt système (instructions au modèle).
+            user_message: Message utilisateur (données à analyser).
+            max_tokens:   Limite de tokens en sortie.
+
+        Raises:
+            ValueError: Si le provider n'est pas reconnu.
+        """
         if self.provider == "anthropic":
             return await self._call_anthropic_text(system, user_message, max_tokens)
         elif self.provider == "openai":
@@ -399,6 +434,7 @@ Notes PBR des participants :
             raise ValueError(f"Provider LLM non supporté : {self.provider}")
 
     async def _call_anthropic_text(self, system: str, user_message: str, max_tokens: int = 4096) -> str:
+        """Appel via le SDK Anthropic (claude-*)."""
         import anthropic
         client = anthropic.AsyncAnthropic(api_key=self.api_key)
         message = await client.messages.create(
@@ -410,6 +446,7 @@ Notes PBR des participants :
         return message.content[0].text
 
     async def _call_openai_text(self, system: str, user_message: str) -> str:
+        """Appel via le SDK OpenAI (gpt-*)."""
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=self.api_key)
         response = await client.chat.completions.create(
@@ -422,6 +459,11 @@ Notes PBR des participants :
         return response.choices[0].message.content
 
     async def _call_azure_text(self, system: str, user_message: str) -> str:
+        """Appel via Azure AI Foundry (``AsyncAzureOpenAI``).
+
+        Raises:
+            ValueError: Si ``llm_endpoint`` n'est pas configuré.
+        """
         from openai import AsyncAzureOpenAI
         if not self.endpoint:
             raise ValueError("llm_endpoint requis pour le provider azure")

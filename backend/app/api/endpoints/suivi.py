@@ -32,18 +32,25 @@ from pydantic import BaseModel
 
 router = APIRouter()
 
-HOURS_PER_DAY = 8.0
+# ── Constantes de conversion et de catégorisation ────────────────────────────
 
+HOURS_PER_DAY = 8.0  # Conversion jours → heures pour les blocs PI Planning
+
+# Groupes de catégories pour le calcul des KPIs agrégés
 STORY_CATEGORIES  = {"stories_dev", "stories_qa"}
 BUGS_CATEGORIES   = {"bugs_maintenance"}
 IMPREV_CATEGORIES = {"imprevus"}
 
 
 class AzdoPathUpdate(BaseModel):
+    """Payload pour associer un chemin d'itération AZDO à un PI."""
+
     azdo_iteration_path: str
 
 
 class CapacityInput(BaseModel):
+    """Capacité saisie manuellement pour un membre sur un sprint (en heures)."""
+
     team_member_id: int
     capa_stories_h: float = 0.0
     capa_bugs_h: float = 0.0
@@ -116,6 +123,7 @@ def clear_pi_azdo_path(pi_id: int, db: Session = Depends(get_db)):
 
 
 def _get_pi_or_404(pi_id: int, db: Session) -> PI:
+    """Retourne le PI ou lève une HTTPException 404 s'il est introuvable."""
     pi = db.query(PI).filter(PI.id == pi_id).first()
     if not pi:
         raise HTTPException(status_code=404, detail="PI non trouvé")
@@ -157,7 +165,16 @@ def _pi_iteration_paths(pi_id: int, db: Session) -> dict[str, int]:
 
 _STORY_PARENT_TYPES = {"User Story", "Enabler Story", "Maintenance"}
 
+
 def _task_category(parent_type: str | None) -> str:
+    """Déduit la catégorie KPI d'une Task en fonction du type de son parent.
+
+    Returns:
+        ``"stories"``     si le parent est User Story, Enabler Story ou Maintenance.
+        ``"bugs"``        si le parent est un Bug.
+        ``"maintenance"`` pour tout autre type de parent.
+        ``"orphan"``      si la tâche n'a pas de parent (imprévus).
+    """
     if parent_type is None:
         return "orphan"
     if parent_type in _STORY_PARENT_TYPES:
@@ -236,6 +253,7 @@ def get_tasks(pi_id: int, sprint: int | None = None, db: Session = Depends(get_d
 
 
 # ── Capacités par sprint ─────────────────────────────────────────────────────
+
 
 def _capacities_as_list(
     pi_id: int, sprint_num: int, db: Session
@@ -601,7 +619,9 @@ def get_overview(pi_id: int, db: Session = Depends(get_db)):
 
 # ── Analyse productivité par membre (LLM) ─────────────────────────────────────
 
-# Mapping titre Hors-Prod → catégorie planning
+# ── Constantes pour l'analyse de productivité ────────────────────────────────
+
+# Mapping mot-clé (lowercase) dans le titre d'une tâche Hors-Prod → catégorie planning
 _HORS_PROD_CATEGORIES = {
     "imprévu":          "imprevus",
     "gestion des impr": "imprevus",
@@ -634,6 +654,7 @@ _CAPA_LABELS: dict[str, str] = {
 
 
 def _strip_html(raw: str) -> str:
+    """Supprime les balises HTML d'une chaîne et normalise les sauts de ligne."""
     if not raw:
         return ""
     text = html_module.unescape(raw)
@@ -645,6 +666,11 @@ def _strip_html(raw: str) -> str:
 
 
 def _hors_prod_category(title: str) -> str:
+    """Déduit la catégorie planning d'une tâche Hors-Prod à partir de son titre.
+
+    Parcourt ``_HORS_PROD_CATEGORIES`` (mot-clé → catégorie) et retourne
+    ``"autre"`` si aucun mot-clé n'est trouvé.
+    """
     t = title.lower()
     for keyword, cat in _HORS_PROD_CATEGORIES.items():
         if keyword in t:
@@ -849,3 +875,126 @@ def get_latest_productivity_report(
         "sprint": f"Sprint {sprint_num}",
         "created_at": report.created_at.isoformat() if report.created_at else None,
     }
+
+
+# ── Stories planifiées par sprint ─────────────────────────────────────────────
+
+@router.get("/pi/{pi_id}/sprint/{sprint_num}/planned-stories")
+def get_planned_stories(pi_id: int, sprint_num: int, db: Session = Depends(get_db)):
+    """Retourne les stories planifiées (Layer 2) du sprint, groupées par Feature/Enabler parent.
+
+    Inclut le statut DoR depuis le PBRItem le plus récent pour chaque story.
+    """
+    from app.models.pi_planning import PlanningBlock
+    from app.models.work_item import WorkItem
+    from app.models.team_member import TeamMember
+    from app.models.pbr import PBRItem
+    from collections import defaultdict
+
+    # Blocs Layer 2 du sprint avec work_item_id
+    blocks = (
+        db.query(PlanningBlock)
+        .filter(
+            PlanningBlock.pi_id == pi_id,
+            PlanningBlock.layer == 2,
+            PlanningBlock.sprint_number == sprint_num,
+            PlanningBlock.work_item_id.isnot(None),
+        )
+        .all()
+    )
+    if not blocks:
+        return {"groups": [], "orphans": []}
+
+    # Agréger par work_item_id : total jours + membres
+    story_days: dict[int, float] = defaultdict(float)
+    story_members: dict[int, set] = defaultdict(set)
+    for b in blocks:
+        story_days[b.work_item_id] += b.duration_days
+        story_members[b.work_item_id].add(b.team_member_id)
+
+    wi_ids = list(story_days.keys())
+
+    # Charger les work items stories
+    stories = {
+        wi.id: wi
+        for wi in db.query(WorkItem).filter(WorkItem.id.in_(wi_ids)).all()
+    }
+
+    # Charger les membres
+    member_ids = {mid for mids in story_members.values() for mid in mids}
+    members_map = {
+        m.id: m
+        for m in db.query(TeamMember).filter(TeamMember.id.in_(member_ids)).all()
+    }
+
+    # Charger les parents (Feature/Enabler)
+    parent_ids = list({wi.parent_id for wi in stories.values() if wi.parent_id})
+    parents = {
+        wi.id: wi
+        for wi in db.query(WorkItem).filter(WorkItem.id.in_(parent_ids)).all()
+    } if parent_ids else {}
+
+    # Charger le dernier PBRItem pour chaque story (pour le statut DoR)
+    # On prend le plus récent (id le plus grand) pour chaque work_item_id
+    pbr_items_raw = (
+        db.query(PBRItem)
+        .filter(PBRItem.work_item_id.in_(wi_ids))
+        .order_by(PBRItem.id.desc())
+        .all()
+    )
+    pbr_by_story: dict[int, PBRItem] = {}
+    for pi_item in pbr_items_raw:
+        if pi_item.work_item_id not in pbr_by_story:
+            pbr_by_story[pi_item.work_item_id] = pi_item
+
+    # Construire les données story
+    def build_story(wid: int) -> dict:
+        wi = stories.get(wid)
+        if not wi:
+            return {"id": wid, "title": "?", "type": "?", "state": "?", "members": [], "total_days": 0, "total_hours": 0}
+        mids = story_members.get(wid, set())
+        member_list = [
+            {"id": m.id, "name": m.display_name, "profile": m.profile}
+            for m in (members_map.get(mid) for mid in mids) if m
+        ]
+        pbr = pbr_by_story.get(wid)
+        return {
+            "id": wid,
+            "title": wi.title,
+            "type": wi.type,
+            "state": wi.state,
+            "members": member_list,
+            "total_days": round(story_days[wid], 2),
+            "total_hours": round(story_days[wid] * 8, 1),
+            "pbr_item_id": pbr.id if pbr else None,
+            "dor_note": pbr.ia_dor_note if pbr else None,
+            "dor_comment": pbr.ia_comment if pbr else None,
+            "dor_analyzed_at": pbr.ia_analyzed_at.isoformat() if pbr and pbr.ia_analyzed_at else None,
+        }
+
+    # Grouper par parent (Feature/Enabler)
+    grouped: dict[int | None, list] = defaultdict(list)
+    for wid, wi in stories.items():
+        grouped[wi.parent_id].append(wid)
+
+    groups = []
+    orphan_ids = []
+    for parent_id, wids in grouped.items():
+        parent = parents.get(parent_id) if parent_id else None
+        if parent:
+            groups.append({
+                "parent_id": parent.id,
+                "parent_title": parent.title,
+                "parent_type": parent.type,
+                "parent_state": parent.state,
+                "stories": [build_story(wid) for wid in sorted(wids)],
+            })
+        else:
+            orphan_ids.extend(wids)
+
+    # Tri des groupes par title du parent
+    groups.sort(key=lambda g: g["parent_title"] or "")
+
+    orphans = [build_story(wid) for wid in sorted(orphan_ids)]
+
+    return {"groups": groups, "orphans": orphans}
