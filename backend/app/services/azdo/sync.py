@@ -146,7 +146,7 @@ class AzdoSyncService:
             # ── Synchronisation des work items ────────────────────────────────
             date_filter = ""
             if since_date:
-                since_str = since_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+                since_str = since_date.strftime("%Y-%m-%d")
                 date_filter = f"AND [System.ChangedDate] >= '{since_str}' "
 
             query = (
