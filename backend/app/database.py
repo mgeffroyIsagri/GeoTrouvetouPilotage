@@ -167,6 +167,44 @@ def _run_migrations() -> None:
         except Exception:
             pass
 
+        # Tables triggers et trigger_logs (automatisations planifiées)
+        try:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS triggers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name VARCHAR(200) NOT NULL,
+                    action_type VARCHAR(100) NOT NULL,
+                    action_params TEXT,
+                    schedule_type VARCHAR(20) NOT NULL,
+                    schedule_value VARCHAR(100) NOT NULL,
+                    enabled BOOLEAN DEFAULT 1,
+                    last_run_at DATETIME,
+                    last_run_status VARCHAR(20),
+                    last_run_summary VARCHAR(500),
+                    next_run_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            conn.commit()
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS trigger_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trigger_id INTEGER REFERENCES triggers(id),
+                    ran_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    status VARCHAR(20) NOT NULL,
+                    duration_ms INTEGER,
+                    result_summary VARCHAR(500),
+                    result_detail TEXT
+                )
+            """))
+            conn.commit()
+        except Exception:
+            pass
+
         # Chiffrement des secrets existants en clair (migration one-shot)
         try:
             from app.services.crypto import encrypt_value, is_encrypted, SENSITIVE_KEYS

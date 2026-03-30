@@ -7,7 +7,7 @@ valide fourni via ``get_current_user``.
 
 from fastapi import APIRouter, Depends
 
-from app.api.endpoints import pi, pi_planning, pbr, azdo, settings, team_members, leaves, logs, suivi, auth, train_kpi, admin
+from app.api.endpoints import pi, pi_planning, pbr, azdo, settings, team_members, leaves, logs, suivi, auth, train_kpi, admin, triggers
 from app.services.auth import get_current_user
 
 api_router = APIRouter()
@@ -29,3 +29,4 @@ api_router.include_router(logs.router,         prefix="/logs",         tags=["Lo
 api_router.include_router(suivi.router,        prefix="/suivi",        tags=["Suivi"],          dependencies=_auth)
 api_router.include_router(train_kpi.router,    prefix="/train-kpi",    tags=["KPI Train"],      dependencies=_auth)
 api_router.include_router(admin.router,        prefix="/admin",        tags=["Admin PI"],       dependencies=_auth)
+api_router.include_router(triggers.router,                             tags=["Triggers"],       dependencies=_auth)

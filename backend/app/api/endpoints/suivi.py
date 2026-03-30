@@ -998,3 +998,453 @@ def get_planned_stories(pi_id: int, sprint_num: int, db: Session = Depends(get_d
     orphans = [build_story(wid) for wid in sorted(orphan_ids)]
 
     return {"groups": groups, "orphans": orphans}
+
+
+@router.post("/pi/{pi_id}/sprint/{sprint_num}/scrum-of-scrums")
+async def generate_scrum_of_scrums(pi_id: int, sprint_num: int, db: Session = Depends(get_db)):
+    """Génère un CR Scrum of Scrums par IA à partir des données du sprint."""
+    import json as _json
+    import time as _time
+    from datetime import datetime as _dt
+    from app.models.pbr import PBRItem
+    from collections import defaultdict
+
+    # Récupérer les stories planifiées (Layer 2)
+    blocks = (
+        db.query(PlanningBlock)
+        .filter(
+            PlanningBlock.pi_id == pi_id,
+            PlanningBlock.layer == 2,
+            PlanningBlock.sprint_number == sprint_num,
+            PlanningBlock.work_item_id.isnot(None),
+        )
+        .all()
+    )
+
+    # Agréger par work_item_id
+    story_days: dict[int, float] = defaultdict(float)
+    story_members_ids: dict[int, set] = defaultdict(set)
+    for b in blocks:
+        story_days[b.work_item_id] += b.duration_days
+        story_members_ids[b.work_item_id].add(b.team_member_id)
+
+    wi_ids = list(story_days.keys())
+
+    # Charger les work items
+    stories = {wi.id: wi for wi in db.query(WorkItem).filter(WorkItem.id.in_(wi_ids)).all()} if wi_ids else {}
+
+    # Charger les membres
+    all_member_ids = {mid for mids in story_members_ids.values() for mid in mids}
+    members_map = {m.id: m for m in db.query(TeamMember).filter(TeamMember.id.in_(all_member_ids)).all()} if all_member_ids else {}
+
+    # Charger les parents
+    parent_ids = list({wi.parent_id for wi in stories.values() if wi.parent_id})
+    parents = {wi.id: wi for wi in db.query(WorkItem).filter(WorkItem.id.in_(parent_ids)).all()} if parent_ids else {}
+
+    # Charger les PBRItems pour le statut DoR
+    pbr_items_raw = db.query(PBRItem).filter(PBRItem.work_item_id.in_(wi_ids)).order_by(PBRItem.id.desc()).all() if wi_ids else []
+    pbr_by_story: dict[int, PBRItem] = {}
+    for pi_item in pbr_items_raw:
+        if pi_item.work_item_id not in pbr_by_story:
+            pbr_by_story[pi_item.work_item_id] = pi_item
+
+    # Récupérer le PI et l'itération du sprint
+    pi = db.query(PI).filter(PI.id == pi_id).first()
+    iteration = db.query(Iteration).filter(
+        Iteration.pi_id == pi_id,
+        Iteration.sprint_number == sprint_num,
+    ).first()
+
+    # Construire le contenu pour le LLM
+    lines = []
+
+    pi_name = pi.name if pi else f"PI#{pi_id}"
+    sprint_label = f"Sprint {sprint_num}"
+    if iteration:
+        lines.append(f"Équipe : GeoTrouvetou")
+        lines.append(f"Sprint : {sprint_label} – {pi_name}")
+        lines.append(f"Période : {iteration.start_date.strftime('%d/%m/%Y') if iteration.start_date else '?'} → {iteration.end_date.strftime('%d/%m/%Y') if iteration.end_date else '?'}")
+    else:
+        lines.append(f"Équipe : GeoTrouvetou — {sprint_label} — {pi_name}")
+    lines.append("")
+
+    # Grouper les stories par parent
+    grouped: dict = defaultdict(list)
+    for wid, wi in stories.items():
+        grouped[wi.parent_id].append(wi)
+
+    lines.append("## Stories planifiées sur ce sprint\n")
+
+    for parent_id, story_list in grouped.items():
+        parent = parents.get(parent_id) if parent_id else None
+        if parent:
+            lines.append(f"### {parent.type} #{parent.id} — {parent.title}")
+            lines.append(f"   État : {parent.state or '?'}")
+        else:
+            lines.append("### (Sans parent)")
+
+        for wi in story_list:
+            days = story_days.get(wi.id, 0)
+            member_names = ", ".join(
+                members_map[mid].display_name
+                for mid in story_members_ids.get(wi.id, set())
+                if mid in members_map
+            )
+            pbr = pbr_by_story.get(wi.id)
+            dor_str = f"DoR {pbr.ia_dor_note}/5" if pbr and pbr.ia_dor_note is not None else "DoR non analysé"
+
+            lines.append(f"  - [{wi.state or '?'}] #{wi.id} {wi.title}")
+            lines.append(f"    Assigné : {member_names or '?'} | Charge planifiée : {days}j | {dor_str}")
+
+        lines.append("")
+
+    # Membres de l'équipe impliqués
+    all_members = sorted({m.display_name for m in members_map.values()})
+    lines.append(f"## Membres impliqués\n{', '.join(all_members)}\n")
+
+    content = "\n".join(lines)
+
+    SCRUM_PROMPT = """Tu es un assistant Agile / DevOps expérimenté, habitué aux contextes Scrum of Scrums, SAFe et pilotage inter-équipes.
+
+Ton rôle est de générer un compte rendu de réunion Scrum of Scrums à partir des informations fournies par une équipe.
+
+Le compte rendu doit être :
+
+clair, structuré et synthétique
+
+orienté synchronisation inter-équipes
+
+factuel, sans extrapolation hasardeuse
+
+partiellement incomplet si l'information est absente, afin de permettre un complément manuel
+
+📥 Entrée attendue
+
+Le contenu du sprint courant d'une équipe (stories, enablers, tâches, état d'avancement, éventuelles notes).
+
+🧾 Contexte de la réunion
+
+Réunion : Scrum of Scrums
+Objectif : synchronisation des ASL
+
+Ordre du jour :
+
+Avancement des équipes et synchronisation inter-équipes
+
+Obstacles rencontrés
+
+Dépendances et adhérences
+
+Métriques équipes à remonter au RTE
+
+Vote de fin de sprint
+
+Vote de confiance pour le sprint qui débute
+
+🧱 Structure attendue du compte rendu
+1. Contexte et périmètre de l'équipe
+
+Équipe concernée
+
+Sprint / PI
+
+Thématiques principales du sprint
+
+2. Avancement du sprint
+
+Sujets majeurs en cours ou terminés
+
+Éléments structurants (enablers, chantiers techniques, livraisons)
+
+Niveau d'avancement global (qualitatif)
+
+3. Synchronisation inter-équipes
+
+Interactions identifiées avec d'autres équipes / ASL
+
+Points de coordination nécessaires
+
+Impacts potentiels sur le planning global
+
+(Si aucune information n'est disponible, indiquer explicitement : « À compléter »)
+
+4. Obstacles et risques
+
+Blocages techniques, organisationnels ou dépendances externes
+
+Risques identifiés pour la suite du sprint ou du PI
+
+(Ne pas inventer de risques non présents dans le fichier)
+
+5. Dépendances et adhérences
+
+Dépendances sortantes (ce que l'équipe attend des autres)
+
+Dépendances entrantes (ce que l'équipe fournit)
+
+Points nécessitant arbitrage ou suivi RTE
+
+6. Métriques et indicateurs
+
+Éléments observables dans le sprint (charge, avancement, stabilité, qualité si présents)
+
+Limites de lecture si les données sont incomplètes
+
+7. Vote de fin de sprint
+
+État du vote : À renseigner / Non communiqué
+
+8. Vote de confiance pour le sprint à venir
+
+État du vote : À renseigner / Non communiqué
+
+✍️ Règles de rédaction
+
+Style professionnel, neutre et factuel
+
+Une dizaine de lignes maximum
+
+Pas de jargon inutile
+
+Utiliser des listes à puces quand pertinent
+
+Ne jamais supposer une information absente
+
+Signaler clairement les sections nécessitant un complément humain
+
+Génère uniquement le compte rendu final, prêt à être partagé ou complété."""
+
+    from app.services.llm.client import LLMClient
+    try:
+        client = LLMClient(db)
+        t0 = _time.monotonic()
+        report = await client._call_text(SCRUM_PROMPT, content)
+        duration_ms = int((_time.monotonic() - t0) * 1000)
+
+        db.add(LLMLog(
+            log_type="LLM_RESPONSE",
+            pi_id=pi_id,
+            sprint_num=sprint_num,
+            summary=f"CR Scrum of Scrums Sprint {sprint_num} — {duration_ms}ms",
+            content=_json.dumps({"sprint": sprint_num, "pi": pi_name, "report": report}, ensure_ascii=False),
+            duration_ms=duration_ms,
+        ))
+        db.commit()
+
+        return {"report": report}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Erreur IA : {exc}")
+
+
+@router.post("/analyze-wi/{azdo_wi_id}")
+async def analyze_wi_dor(azdo_wi_id: int, db: Session = Depends(get_db)):
+    """Analyse DoR IA pour un work item AZDO directement (sans session PBR)."""
+    import re as _re
+    import html as _html
+    import json as _json
+    import time as _time
+    from datetime import datetime as _dt
+    from app.models.pbr import PBRItem
+    from app.services.azdo.sync import AzdoSyncService
+
+    wi_db = db.query(WorkItem).filter(WorkItem.id == azdo_wi_id).first()
+
+    def _save_log(log_type: str, summary: str, content: str, duration_ms: int | None = None):
+        try:
+            db.add(LLMLog(
+                log_type=log_type,
+                work_item_id=azdo_wi_id,
+                summary=summary[:300],
+                content=content,
+                duration_ms=duration_ms,
+            ))
+            db.commit()
+        except Exception:
+            pass
+
+    def strip_html(value) -> str:
+        if not value:
+            return ""
+        text = _html.unescape(str(value))
+        text = _re.sub(r"<([A-Za-z][A-Za-z0-9_,\s]*(?:\[\])?)>", r"[\1]", text)
+        text = _re.sub(r"(?i)<\s*br\s*/?\s*>", "\n", text)
+        text = _re.sub(r"(?i)</\s*p\s*>", "\n", text)
+        text = _re.sub(r"(?i)<\s*p\s*>", "", text)
+        text = _re.sub(r"<[^>]+>", "", text)
+        text = _re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+    def truncate(text: str, max_chars: int) -> str:
+        if not text or len(text) <= max_chars:
+            return text
+        return text[:max_chars].rsplit("\n", 1)[0] + f"\n[... tronqué]"
+
+    def display_name(assigned) -> str | None:
+        return assigned.get("displayName") if isinstance(assigned, dict) else assigned
+
+    def get_ac(fields: dict) -> str | None:
+        return fields.get("Isagri.Feature.CritereAcceptance") or \
+               fields.get("Microsoft.VSTS.Common.AcceptanceCriteria")
+
+    def hierarchy_child_ids(raw: dict) -> list[int]:
+        ids = []
+        for rel in raw.get("relations", []):
+            if rel.get("rel") == "System.LinkTypes.Hierarchy-Forward":
+                try:
+                    ids.append(int(rel["url"].rstrip("/").split("/")[-1]))
+                except (ValueError, KeyError):
+                    pass
+        return ids
+
+    STORY_TYPES = {"User Story", "Enabler Story", "Maintenance", "Bug"}
+
+    azdo_raw: dict[int, dict] = {}
+    azdo_comments: dict[int, list] = {}
+
+    try:
+        azdo_client = AzdoSyncService(db)._build_client()
+
+        async def fetch(wi_id: int, with_comments: bool = False):
+            try:
+                azdo_raw[wi_id] = await azdo_client.get_work_item_detail(wi_id)
+            except Exception:
+                return
+            if with_comments:
+                try:
+                    azdo_comments[wi_id] = await azdo_client.get_work_item_comments(wi_id, top=5)
+                except Exception:
+                    pass
+
+        await fetch(azdo_wi_id, with_comments=True)
+        root_raw = azdo_raw.get(azdo_wi_id, {})
+        root_wi_type = root_raw.get("fields", {}).get("System.WorkItemType", "")
+        root_is_story = root_wi_type in STORY_TYPES
+
+        if root_is_story:
+            parent_azdo_id = root_raw.get("fields", {}).get("Isagri.Agile.ParentId")
+            if not parent_azdo_id and wi_db and wi_db.parent_id:
+                parent_azdo_id = wi_db.parent_id
+            if parent_azdo_id:
+                try:
+                    azdo_raw[int(parent_azdo_id)] = await azdo_client.get_work_item_detail(int(parent_azdo_id))
+                except Exception:
+                    pass
+        else:
+            for cid in hierarchy_child_ids(root_raw):
+                await fetch(cid, with_comments=True)
+
+    except Exception as azdo_err:
+        _save_log("ERROR", f"AZDO fetch échoué WI#{azdo_wi_id}", str(azdo_err))
+
+    _save_log(
+        "AZDO_FETCH",
+        f"Fetch AZDO WI#{azdo_wi_id} — {len(azdo_raw)} work items récupérés",
+        _json.dumps({"work_items_fetched": list(azdo_raw.keys())}, ensure_ascii=False),
+    )
+
+    # ── Formatage du contenu ──────────────────────────────────────────────────
+    def format_wi(wi_id: int, standalone: bool = True) -> str:
+        f = azdo_raw.get(wi_id, {}).get("fields", {})
+        wi = db.query(WorkItem).filter(WorkItem.id == wi_id).first() if wi_id == azdo_wi_id else None
+        wtype = f.get("System.WorkItemType") or (wi.type if wi else "?")
+        title = f.get("System.Title") or (wi.title if wi else f"WI#{wi_id}")
+
+        prefix = "===== STORY" if standalone else "----- Story enfant"
+        lines = [f"{prefix} #{wi_id} =====",
+                 f"Type : {wtype}  |  Titre : {title}"]
+
+        state     = f.get("System.State")        or (wi.state          if wi else None)
+        iteration = f.get("System.IterationPath") or (wi.iteration_path if wi else None)
+        assigned  = display_name(f.get("System.AssignedTo")) or (wi.assigned_to if wi else None)
+        sp        = f.get("Microsoft.VSTS.Scheduling.StoryPoints")
+
+        if state:     lines.append(f"État : {state}")
+        if iteration: lines.append(f"Itération : {iteration}")
+        if assigned:  lines.append(f"Assigné à : {assigned}")
+        if sp:        lines.append(f"Story Points : {sp}")
+
+        desc = truncate(strip_html(f.get("System.Description") or (wi.description if wi else "")), 2000)
+        if desc: lines.append(f"\nDescription :\n{desc}")
+
+        ac = truncate(strip_html(get_ac(f) or (wi.acceptance_criteria if wi else "")), 1500)
+        if ac: lines.append(f"\nCritères d'acceptation :\n{ac}")
+
+        # Commentaires
+        for c in azdo_comments.get(wi_id, []):
+            author = c.get("createdBy", {}).get("displayName", "?")
+            text = strip_html(c.get("text", "")).strip()
+            if text:
+                lines.append(f"\n  [{author}] {text[:200]}")
+
+        return "\n".join(lines)
+
+    # Contexte parent si story
+    work_item_content = ""
+    if root_is_story:
+        root_fields = azdo_raw.get(azdo_wi_id, {}).get("fields", {})
+        parent_azdo_id = root_fields.get("Isagri.Agile.ParentId") or (wi_db.parent_id if wi_db else None)
+        if parent_azdo_id and int(parent_azdo_id) in azdo_raw:
+            pf = azdo_raw[int(parent_azdo_id)].get("fields", {})
+            work_item_content += (
+                f"===== ENABLER / FEATURE PARENT #{parent_azdo_id} =====\n"
+                f"Type : {pf.get('System.WorkItemType','?')}  |  Titre : {pf.get('System.Title','?')}\n"
+            )
+            desc_p = truncate(strip_html(pf.get("System.Description") or ""), 1000)
+            if desc_p:
+                work_item_content += f"\nDescription :\n{desc_p}\n"
+            work_item_content += "\n"
+        work_item_content += format_wi(azdo_wi_id, standalone=True)
+    else:
+        pf = azdo_raw.get(azdo_wi_id, {}).get("fields", {})
+        work_item_content = (
+            f"===== ENABLER / FEATURE #{azdo_wi_id} =====\n"
+            f"Type : {root_wi_type}  |  Titre : {pf.get('System.Title','?')}\n"
+        )
+        desc_p = truncate(strip_html(pf.get("System.Description") or ""), 2000)
+        if desc_p:
+            work_item_content += f"\nDescription :\n{desc_p}\n"
+        ac_p = truncate(strip_html(get_ac(pf) or ""), 1500)
+        if ac_p:
+            work_item_content += f"\nCritères d'acceptation :\n{ac_p}\n"
+        # Stories enfants
+        child_ids = [cid for cid in hierarchy_child_ids(azdo_raw.get(azdo_wi_id, {}))
+                     if azdo_raw.get(cid, {}).get("fields", {}).get("System.WorkItemType") in STORY_TYPES]
+        for sid in child_ids:
+            work_item_content += "\n" + format_wi(sid, standalone=False)
+
+    from app.services.llm.client import LLMClient
+    try:
+        client = LLMClient(db)
+        _save_log(
+            "LLM_REQUEST",
+            f"Prompt LLM WI#{azdo_wi_id} ({client.provider}/{client.model}) — {'story' if root_is_story else 'enabler'}",
+            _json.dumps({"prompt_type": "story" if root_is_story else "enabler", "user_message": work_item_content}, ensure_ascii=False, indent=2),
+        )
+        t0 = _time.monotonic()
+        result = await client.analyze_dor(work_item_content, "Aucune note PBR disponible", is_story=root_is_story)
+        duration_ms = int((_time.monotonic() - t0) * 1000)
+
+        note = int(result.get("note", 0))
+        comment = result.get("commentaire", "")
+        analyzed_at = _dt.utcnow()
+
+        _save_log(
+            "LLM_RESPONSE",
+            f"Réponse LLM WI#{azdo_wi_id} — note={note} durée={duration_ms}ms",
+            _json.dumps({"note": note, "commentaire": comment}, ensure_ascii=False),
+            duration_ms=duration_ms,
+        )
+
+        # Mettre à jour le PBRItem le plus récent si présent
+        pbr = db.query(PBRItem).filter(PBRItem.work_item_id == azdo_wi_id).order_by(PBRItem.id.desc()).first()
+        if pbr:
+            pbr.ia_dor_note = note
+            pbr.ia_comment = comment
+            pbr.ia_analyzed_at = analyzed_at
+            db.commit()
+
+        return {"note": note, "comment": comment, "analyzed_at": analyzed_at.isoformat()}
+
+    except Exception as exc:
+        _save_log("ERROR", f"Erreur LLM WI#{azdo_wi_id}: {str(exc)[:200]}", str(exc))
+        raise HTTPException(status_code=500, detail=f"Erreur IA : {exc}")

@@ -31,6 +31,7 @@ export class NavComponent {
     { label: 'Paramètres', route: '/parametres', icon: '⚙️' },
     { label: 'Logs', route: '/logs', icon: '🔎' },
     { label: 'KPI Train', route: '/train-kpi', icon: '🚂' },
+    { label: 'Automatisations', route: '/automatisations', icon: '⚡' },
   ];
 
   constructor(public authService: AuthService) {}

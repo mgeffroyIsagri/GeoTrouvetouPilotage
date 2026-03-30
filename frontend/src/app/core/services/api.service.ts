@@ -398,6 +398,16 @@ export class ApiService {
     return this.http.get<any>(`${this.base}/suivi/pi/${piId}/sprint/${sprintNum}/planned-stories`);
   }
 
+  /** Analyse DoR IA d'un work item AZDO directement (sans session PBR). */
+  analyzeWorkItemDor(azdoWiId: number): Observable<{ note: number; comment: string; analyzed_at: string }> {
+    return this.http.post<any>(`${this.base}/suivi/analyze-wi/${azdoWiId}`, {});
+  }
+
+  /** Génère un CR Scrum of Scrums par IA pour un sprint. */
+  generateScrumReport(piId: number, sprintNum: number): Observable<{ report: string }> {
+    return this.http.post<{ report: string }>(`${this.base}/suivi/pi/${piId}/sprint/${sprintNum}/scrum-of-scrums`, {});
+  }
+
   /** Retourne les tâches AZDO d'un PI enrichies des données parent/grand-parent, optionnellement filtrées par sprint. */
   getSuiviTasks(piId: number, sprint?: number): Observable<SuiviTask[]> {
     let params = new HttpParams();
@@ -509,5 +519,42 @@ export class ApiService {
   /** Met à jour la valeur d'une clé de configuration. */
   updateSetting(key: string, value: string): Observable<AppSetting> {
     return this.http.put<AppSetting>(`${this.base}/settings/${key}`, { key, value });
+  }
+
+  // ── Triggers / Automatisations ────────────────────────────────────────────
+
+  /** Retourne la liste de tous les triggers d'automatisation. */
+  getTriggers(): Observable<any[]> {
+    return this.http.get<any[]>(`${this.base}/triggers/`);
+  }
+
+  /** Crée un nouveau trigger. */
+  createTrigger(payload: any): Observable<any> {
+    return this.http.post<any>(`${this.base}/triggers/`, payload);
+  }
+
+  /** Met à jour un trigger existant. */
+  updateTrigger(id: number, payload: any): Observable<any> {
+    return this.http.put<any>(`${this.base}/triggers/${id}`, payload);
+  }
+
+  /** Supprime un trigger. */
+  deleteTrigger(id: number): Observable<void> {
+    return this.http.delete<void>(`${this.base}/triggers/${id}`);
+  }
+
+  /** Active ou désactive un trigger. */
+  toggleTrigger(id: number): Observable<any> {
+    return this.http.patch<any>(`${this.base}/triggers/${id}/toggle`, {});
+  }
+
+  /** Exécute immédiatement un trigger. */
+  runTrigger(id: number): Observable<any> {
+    return this.http.post<any>(`${this.base}/triggers/${id}/run`, {});
+  }
+
+  /** Retourne les derniers logs d'exécution d'un trigger. */
+  getTriggerLogs(id: number): Observable<any[]> {
+    return this.http.get<any[]>(`${this.base}/triggers/${id}/logs`);
   }
 }

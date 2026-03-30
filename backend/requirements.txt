@@ -14,3 +14,4 @@ fpdf2==2.8.1
 cryptography==43.0.3
 python-jose[cryptography]==3.3.0
 bcrypt==4.2.1
+apscheduler>=3.10.4

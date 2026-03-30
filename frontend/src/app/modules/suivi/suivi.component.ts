@@ -178,6 +178,14 @@ export class SuiviComponent implements OnInit, OnDestroy, AfterViewChecked {
   azdoOrg = '';
   azdoProject = '';
 
+  // ── Sections repliables ──────────────────────────────────────────────────
+  collapsedGroups: { [sprint: number]: Set<number> } = {};
+
+  // ── CR Scrum of Scrums ───────────────────────────────────────────────────
+  scrumReportLoading: { [sprint: number]: boolean } = {};
+  scrumReport: { [sprint: number]: string } = {};
+  scrumReportError: { [sprint: number]: string } = {};
+
   // ── Filtres onglet Général ────────────────────────────────
 
   /** Filtre sur le numéro de sprint (null = tous les sprints). */
@@ -593,21 +601,21 @@ export class SuiviComponent implements OnInit, OnDestroy, AfterViewChecked {
     this.loadPlannedStories(sprint);
   }
 
-  analyzeStory(pbrItemId: number, storyId: number, sprint: number): void {
-    this.analyzingStoryId = storyId;
-    this.api.analyzePBRItem(pbrItemId).subscribe({
-      next: (res: any) => {
+  analyzeStory(story: PlannedStory, sprint: number): void {
+    this.analyzingStoryId = story.id;
+    this.api.analyzeWorkItemDor(story.id).subscribe({
+      next: (res) => {
         const data = this.plannedStoriesData[sprint];
         if (data) {
-          const updateStory = (story: PlannedStory) => {
-            if (story.id === storyId) {
-              story.dor_note = res.ia_dor_note;
-              story.dor_comment = res.ia_comment;
-              story.dor_analyzed_at = res.ia_analyzed_at;
+          const update = (s: PlannedStory) => {
+            if (s.id === story.id) {
+              s.dor_note = res.note;
+              s.dor_comment = res.comment;
+              s.dor_analyzed_at = res.analyzed_at;
             }
           };
-          data.groups.forEach(g => g.stories.forEach(updateStory));
-          data.orphans.forEach(updateStory);
+          data.groups.forEach(g => g.stories.forEach(update));
+          data.orphans.forEach(update);
         }
         this.analyzingStoryId = null;
       },
@@ -657,6 +665,52 @@ export class SuiviComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   getMemberNames(members: StoryMember[]): string {
     return members.map(m => m.name).join(', ');
+  }
+
+  toggleGroup(sprint: number, parentId: number): void {
+    if (!this.collapsedGroups[sprint]) this.collapsedGroups[sprint] = new Set();
+    if (this.collapsedGroups[sprint].has(parentId)) {
+      this.collapsedGroups[sprint].delete(parentId);
+    } else {
+      this.collapsedGroups[sprint].add(parentId);
+    }
+  }
+
+  isGroupCollapsed(sprint: number, parentId: number): boolean {
+    return this.collapsedGroups[sprint]?.has(parentId) ?? false;
+  }
+
+  sprintSummary(sprint: number): { total: number; done: number; active: number; notStarted: number; dorIssues: number } {
+    const data = this.plannedStoriesData[sprint];
+    if (!data) return { total: 0, done: 0, active: 0, notStarted: 0, dorIssues: 0 };
+    const all: PlannedStory[] = [
+      ...data.groups.flatMap(g => g.stories),
+      ...data.orphans,
+    ];
+    return {
+      total: all.length,
+      done: all.filter(s => ['Closed', 'Resolved'].includes(s.state)).length,
+      active: all.filter(s => s.state === 'Active').length,
+      notStarted: all.filter(s => s.state === 'New').length,
+      dorIssues: all.filter(s => s.dor_note !== null && s.dor_note < 4).length,
+    };
+  }
+
+  generateScrumReport(sprint: number): void {
+    if (!this.selectedPiId) return;
+    this.scrumReportLoading[sprint] = true;
+    this.scrumReport[sprint] = '';
+    this.scrumReportError[sprint] = '';
+    this.api.generateScrumReport(this.selectedPiId, sprint).subscribe({
+      next: (res) => {
+        this.scrumReport[sprint] = res.report;
+        this.scrumReportLoading[sprint] = false;
+      },
+      error: (err) => {
+        this.scrumReportError[sprint] = err?.error?.detail || 'Erreur lors de la génération';
+        this.scrumReportLoading[sprint] = false;
+      },
+    });
   }
 
   /** Copie le texte du rapport d'analyse dans le presse-papier. */

@@ -1,0 +1,224 @@
+<div class="auto-page">
+
+  <!-- ── En-tête ─────────────────────────────────────────────────────────── -->
+  <div class="auto-toolbar">
+    <h1 class="page-title">Automatisations</h1>
+    <button class="btn btn-primary" (click)="openCreateForm()">+ Nouveau trigger</button>
+  </div>
+
+  <!-- ── Erreur globale ──────────────────────────────────────────────────── -->
+  <div class="alert alert-error" *ngIf="error">{{ error }}</div>
+
+  <!-- ── Chargement ─────────────────────────────────────────────────────── -->
+  <div class="loading" *ngIf="loading">Chargement…</div>
+
+  <!-- ── Tableau des triggers ────────────────────────────────────────────── -->
+  <div class="table-wrapper" *ngIf="!loading">
+    <table class="trigger-table" *ngIf="triggers.length > 0; else emptyState">
+      <thead>
+        <tr>
+          <th>Nom</th>
+          <th>Action</th>
+          <th>Planification</th>
+          <th>Statut</th>
+          <th>Dernière exécution</th>
+          <th>Prochaine exécution</th>
+          <th>Résumé</th>
+          <th class="col-actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <ng-container *ngFor="let t of triggers">
+          <!-- Ligne principale -->
+          <tr [class.row-disabled]="!t.enabled">
+            <td class="cell-name">{{ t.name }}</td>
+            <td class="cell-action">{{ formatActionType(t.action_type) }}</td>
+            <td class="cell-schedule">{{ formatSchedule(t) }}</td>
+            <td class="cell-status">
+              <span *ngIf="t.last_run_status === 'success'" class="badge badge-success">OK</span>
+              <span *ngIf="t.last_run_status === 'error'" class="badge badge-error">Erreur</span>
+              <span *ngIf="t.last_run_status === 'running'" class="badge badge-running">En cours</span>
+              <span *ngIf="!t.last_run_status" class="badge badge-neutral">—</span>
+            </td>
+            <td class="cell-date">{{ formatDate(t.last_run_at) }}</td>
+            <td class="cell-date">{{ formatDate(t.next_run_at) }}</td>
+            <td class="cell-summary">{{ t.last_run_summary || '—' }}</td>
+            <td class="cell-actions">
+              <button
+                class="btn-icon"
+                [title]="t.enabled ? 'Désactiver' : 'Activer'"
+                (click)="toggleTrigger(t)"
+              >{{ t.enabled ? '⏸' : '▶' }}</button>
+              <button
+                class="btn-icon btn-run"
+                title="Exécuter maintenant"
+                [disabled]="isRunning(t.id)"
+                (click)="runNow(t)"
+              >{{ isRunning(t.id) ? '⏳' : '▶▶' }}</button>
+              <button
+                class="btn-icon"
+                title="Voir les logs"
+                [class.btn-icon--active]="selectedTriggerId === t.id"
+                (click)="toggleLogs(t)"
+              >📋</button>
+              <button
+                class="btn-icon"
+                title="Modifier"
+                (click)="openEditForm(t)"
+              >✎</button>
+              <button
+                class="btn-icon btn-danger"
+                title="Supprimer"
+                (click)="deleteTrigger(t)"
+              >🗑</button>
+            </td>
+          </tr>
+
+          <!-- Panneau de logs (affiché sous la ligne si sélectionné) -->
+          <tr *ngIf="selectedTriggerId === t.id" class="row-logs-panel">
+            <td colspan="8">
+              <div class="logs-panel">
+                <div class="logs-panel-header">
+                  <span class="logs-panel-title">Logs d'exécution — {{ t.name }}</span>
+                  <button class="btn-icon" title="Fermer" (click)="selectedTriggerId = null">✕</button>
+                </div>
+
+                <div class="logs-loading" *ngIf="logsLoading">Chargement des logs…</div>
+
+                <div class="logs-empty" *ngIf="!logsLoading && triggerLogs.length === 0">
+                  Aucun log disponible.
+                </div>
+
+                <table class="logs-table" *ngIf="!logsLoading && triggerLogs.length > 0">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Statut</th>
+                      <th>Durée</th>
+                      <th>Résumé</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <ng-container *ngFor="let log of triggerLogs">
+                      <tr
+                        class="log-row"
+                        [class.log-row--selected]="selectedLog?.id === log.id"
+                        (click)="toggleLogDetail(log)"
+                      >
+                        <td>{{ formatDate(log.ran_at) }}</td>
+                        <td>
+                          <span *ngIf="log.status === 'success'" class="badge badge-success">OK</span>
+                          <span *ngIf="log.status === 'error'" class="badge badge-error">Erreur</span>
+                        </td>
+                        <td>{{ formatDuration(log.duration_ms) }}</td>
+                        <td>{{ log.result_summary || '—' }}</td>
+                      </tr>
+                      <!-- Détail JSON -->
+                      <tr *ngIf="selectedLog?.id === log.id" class="log-detail-row">
+                        <td colspan="4">
+                          <pre class="log-detail-json">{{ formatDetailJson(log.result_detail) }}</pre>
+                        </td>
+                      </tr>
+                    </ng-container>
+                  </tbody>
+                </table>
+              </div>
+            </td>
+          </tr>
+        </ng-container>
+      </tbody>
+    </table>
+
+    <ng-template #emptyState>
+      <div class="empty-state">
+        <p>Aucun trigger configuré.</p>
+        <button class="btn btn-primary" (click)="openCreateForm()">Créer un premier trigger</button>
+      </div>
+    </ng-template>
+  </div>
+
+  <!-- ── Formulaire de création/édition (modale) ─────────────────────────── -->
+  <div class="modal-backdrop" *ngIf="showForm" (click)="cancelForm()"></div>
+  <div class="modal" *ngIf="showForm">
+    <div class="modal-header">
+      <h2 class="modal-title">{{ editingTriggerId !== null ? 'Modifier le trigger' : 'Nouveau trigger' }}</h2>
+      <button class="btn-icon" (click)="cancelForm()">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="form-error" *ngIf="formError">{{ formError }}</div>
+
+      <!-- Nom -->
+      <div class="field">
+        <label class="field-label">Nom</label>
+        <input
+          class="field-input"
+          type="text"
+          [(ngModel)]="form.name"
+          placeholder="Ex : Sync AZDO quotidienne"
+        />
+      </div>
+
+      <!-- Action -->
+      <div class="field">
+        <label class="field-label">Action</label>
+        <select class="field-select" [(ngModel)]="form.action_type">
+          <option value="azdo_sync_incremental">Synchronisation AZDO incrémentale</option>
+        </select>
+      </div>
+
+      <!-- Paramètre lookback -->
+      <div class="field" *ngIf="form.action_type === 'azdo_sync_incremental'">
+        <label class="field-label">Lookback (jours)</label>
+        <input
+          class="field-input field-input--short"
+          type="number"
+          min="1"
+          max="90"
+          [(ngModel)]="form.lookback_days"
+        />
+        <span class="field-hint">Nombre de jours en arrière si aucune sync précédente n'est trouvée</span>
+      </div>
+
+      <!-- Type de planification -->
+      <div class="field">
+        <label class="field-label">Type de planification</label>
+        <select class="field-select" [(ngModel)]="form.schedule_type">
+          <option value="interval">Intervalle (toutes les X minutes)</option>
+          <option value="daily">Quotidien (à une heure fixe)</option>
+          <option value="cron">Expression cron</option>
+        </select>
+      </div>
+
+      <!-- Valeur de planification -->
+      <div class="field">
+        <label class="field-label">
+          <span *ngIf="form.schedule_type === 'interval'">Intervalle (minutes)</span>
+          <span *ngIf="form.schedule_type === 'daily'">Heure (HH:MM)</span>
+          <span *ngIf="form.schedule_type === 'cron'">Expression cron</span>
+        </label>
+        <input
+          class="field-input"
+          type="text"
+          [(ngModel)]="form.schedule_value"
+          [placeholder]="form.schedule_type === 'interval' ? '60' : form.schedule_type === 'daily' ? '08:00' : '0 8 * * 1-5'"
+        />
+        <span class="field-hint">{{ getScheduleHint() }}</span>
+      </div>
+
+      <!-- Actif -->
+      <div class="field field--inline">
+        <label class="field-label">Actif</label>
+        <input type="checkbox" [(ngModel)]="form.enabled" class="field-checkbox" />
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-secondary" (click)="cancelForm()">Annuler</button>
+      <button class="btn btn-primary" [disabled]="formSaving" (click)="saveForm()">
+        {{ formSaving ? 'Enregistrement…' : 'Enregistrer' }}
+      </button>
+    </div>
+  </div>
+
+</div>

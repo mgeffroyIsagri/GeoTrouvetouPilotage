@@ -67,6 +67,13 @@ export const routes: Routes = [
       import('./modules/train-kpi/train-kpi.component').then((m) => m.TrainKpiComponent),
   },
 
+  {
+    path: 'automatisations',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./modules/automatisations/automatisations.component').then((m) => m.AutomatisationsComponent),
+  },
+
   // ── Fallback ─────────────────────────────────────────────────────────────────
   {
     path: '**',

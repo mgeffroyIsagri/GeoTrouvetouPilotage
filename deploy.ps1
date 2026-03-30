@@ -61,11 +61,11 @@ Write-Host "   OK -> deploy.zip ($sizeMB MB)"
 
 # --- 4. Deploiement Azure ---
 Write-Host "Deploiement sur Azure App Service..." -ForegroundColor Cyan
-& $AZ webapp deploy `
+& $AZ webapp deployment source config-zip `
   --name $WEB_APP `
   --resource-group $RESOURCE_GROUP `
-  --src-path $zipPath `
-  --type zip
+  --src $zipPath `
+  --timeout 300
 
 if ($LASTEXITCODE -ne 0) { Write-Error "Deploiement Azure echoue"; exit 1 }
 

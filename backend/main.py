@@ -18,8 +18,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi import Response
 
-from app.database import init_db
+from app.database import init_db, SessionLocal
 from app.api.router import api_router
+from app.services.scheduler import init_scheduler, shutdown_scheduler
 
 # ── Application FastAPI ────────────────────────────────────────────────────────
 
@@ -55,12 +56,20 @@ app.include_router(api_router, prefix="/api")
 
 @app.on_event("startup")
 async def startup():
-    """Initialise la base de données au démarrage de l'application.
+    """Initialise la base de données et démarre le scheduler au démarrage.
 
-    Crée les tables manquantes et exécute les migrations idempotentes
-    définies dans ``app/database.py``.
+    Crée les tables manquantes, exécute les migrations idempotentes
+    définies dans ``app/database.py``, puis démarre le scheduler APScheduler
+    et charge les triggers actifs depuis la base.
     """
     init_db()
+    init_scheduler(lambda: iter([SessionLocal()]))
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Arrête proprement le scheduler APScheduler."""
+    shutdown_scheduler()
 
 
 # ── Endpoint de santé ──────────────────────────────────────────────────────────
