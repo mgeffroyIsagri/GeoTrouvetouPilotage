@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**GeoTrouvetouPilotage** — Internal tool for the GeoTrouvetou team (Groupe Isagri) to manage PI Planning, PBR sessions, KPIs, and Azure DevOps synchronization. Replaces Klaxoon and ad-hoc Python scripts.
+**GeoTrouvetouPilotage** — Internal tool for the GeoTrouvetou team (Groupe Isagri) to manage PI Planning, PBR sessions, KPIs, Admin PI operations, and Azure DevOps synchronization. Replaces Klaxoon and ad-hoc Python scripts.
+
+**Production URL**: https://GeotrouvetouWeb.azurewebsites.net (Azure App Service, France Central)
 
 ## Running the Application
 
@@ -29,17 +31,22 @@ App: `http://localhost:4200`
 cd frontend && npx ng build --configuration=development
 ```
 
+**Deploy to Azure**:
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File "deploy.ps1"
+```
+
 ## Architecture
 
 ### Backend (`backend/`)
 
-- **`main.py`** — FastAPI app, CORS for `localhost:4200`, calls `init_db()` on startup
+- **`main.py`** — FastAPI app, CORS for `localhost:4200`, serves Angular static build from `backend/static/`, calls `init_db()` on startup
 - **`app/database.py`** — SQLite engine (`geotrouvetou.db`), `init_db()` runs `create_all` + `_run_migrations()`. Migrations are manual `ALTER TABLE` statements wrapped in try/except (idempotent).
 - **`app/models/`** — SQLAlchemy 2.0 ORM models (`mapped_column` style). Key models: `PI`, `Iteration`, `TeamMember`, `PlanningBlock`, `Leave`, `WorkItem`, `PBRSession`, `PBRItem`, `PBRVote`, `AppSettings`, `SyncLog`, `LLMLog`, `SprintCapacity`.
-- **`app/api/endpoints/`** — One file per domain: `pi.py`, `pi_planning.py`, `leaves.py`, `pbr.py`, `azdo.py`, `settings.py`, `team_members.py`, `logs.py`, `suivi.py`. All mounted under `/api` in `router.py`.
-- **`app/services/azdo/`** — `client.py` (httpx-based AZDO REST client), `sync.py` (sync orchestration), `errors.py` (HTTP error mapping). The `organization` field accepts either a full URL (`https://dev.azure.com/MonOrg`) or just the org name — the client strips the prefix automatically.
-- **`app/services/capacity.py`** — Auto-generates Layer 1 planning blocks only (no story blocks). Matrices (Dev/QA/PSM) define days per category per available working days in a week (0–5). Profiles `Squad Lead` and `Automate` are skipped. Leave offsets are computed per week to select the correct matrix row.
-- **`app/services/llm/client.py`** — Configurable LLM client supporting `openai`, `anthropic`, and `azure` (Azure AI Foundry via `AsyncAzureOpenAI`). Two system prompts: `SYSTEM_PROMPT_ENABLER` (for Features/Enablers — description, AC, valeur métier, risques, effort, découpage stories) and `SYSTEM_PROMPT_STORY` (for stories — description, AC, refinement technique, SP, charge DEV/QA, plan de test, adhérences). `analyze_dor()` takes `is_story: bool` to select the correct prompt.
+- **`app/api/endpoints/`** — One file per domain: `pi.py`, `pi_planning.py`, `leaves.py`, `pbr.py`, `azdo.py`, `settings.py`, `team_members.py`, `logs.py`, `suivi.py`, `admin.py`. All mounted under `/api` in `router.py`.
+- **`app/services/azdo/`** — `client.py` (httpx-based AZDO REST client, read + write), `sync.py` (sync orchestration), `errors.py` (HTTP error mapping). The `organization` field accepts either a full URL (`https://dev.azure.com/MonOrg`) or just the org name — the client strips the prefix automatically.
+- **`app/services/capacity.py`** — Auto-generates Layer 1 planning blocks only (no story blocks). Matrices (Dev/QA/PSM) define days per category per available working days in a week (0–5, **with 0.5-step support**). Profiles `Squad Lead` and `Automate` are skipped. Leave offsets are computed per week to select the correct matrix row. `CATEGORY_ALIASES` maps `"ceremonies"→"agility"`, `"bugs"→"bugs_maintenance"`.
+- **`app/services/llm/client.py`** — Configurable LLM client supporting `openai`, `anthropic`, and `azure` (Azure AI Foundry via `AsyncAzureOpenAI`). Two system prompts: `SYSTEM_PROMPT_ENABLER` (for Features/Enablers) and `SYSTEM_PROMPT_STORY` (for stories). `analyze_dor()` returns a note **on a scale of /5** (not /10). `_call_text(system, user)` is the generic async LLM call method.
 
 ### Frontend (`frontend/src/app/`)
 
@@ -47,6 +54,7 @@ cd frontend && npx ng build --configuration=development
 - **`core/services/api.service.ts`** — All HTTP calls. Base URL: `http://localhost:8002/api`.
 - **`core/services/calendar.service.ts`** — Sprint date utilities. Key methods: `getWorkingDays`, `dateToOffset` (date → day_offset), `workingDayToISO`, `offsetToPixel`, `pixelToOffset` (snaps to 0.5).
 - **`modules/`** — Lazy-loaded standalone components: `pi-planning`, `pbr`, `suivi`, `historique`, `parametres`, `logs`.
+- **`modules/pi-planning/admin-panel/`** — Admin panel component (6 tabs, AZDO write operations).
 
 ### Key Domain Concepts
 
@@ -58,19 +66,23 @@ cd frontend && npx ng build --configuration=development
 - Layer 1 = fixed capacity blocks (agility, réunions, bugs, etc.) — non-draggable, auto-generated by `capacity.py`
 - Layer 2 = story blocks (stories_dev, stories_qa) — manually added, draggable + resizable
 
-**Capacity generation** (`POST /api/planning/pi/{id}/generate`): deletes existing auto-generated blocks and regenerates Layer 1 only. Story blocks are **never** auto-generated. Leave offsets are taken into account per week to select the correct matrix row.
+**Capacity generation** (`POST /api/planning/pi/{id}/generate`): deletes existing auto-generated blocks and regenerates Layer 1 only. Story blocks are **never** auto-generated. Leave offsets are taken into account per week to select the correct matrix row. Accepts optional `team_member_id` and `sprint_number` to target a single member/sprint.
+
+**Capacity matrix keys**: stored as float strings in JSON (`"3.5"`, `"4.0"`). Parsed with `float(k)`. Half-day steps (0.5) are supported. `n_available` is a float with 0.5-step precision.
+
+**DoR notes**: LLM returns a note **on a scale of 0–5**. Always display as `X/5`, never `/10`. Threshold for "not DoR": `< 4`.
 
 **Profiles**: Dev, QA, PSM generate capacity blocks. `Squad Lead` and `Automate` are skipped during generation and have no story capacity.
 
 **Drag & drop**: Native mouse events (`mousedown` → `document` `mousemove`/`mouseup`), snaps to 0.5-day increments.
 
 **Reset endpoints**:
-- `DELETE /api/planning/pi/{pi_id}/reset` — supprime tous blocs + congés du PI
-- `DELETE /api/planning/pi/{pi_id}/sprint/{n}/reset` — supprime blocs + congés d'un sprint
+- `DELETE /api/planning/pi/{pi_id}/reset` — supprime tous blocs + congés du PI (optional `team_member_id`)
+- `DELETE /api/planning/pi/{pi_id}/sprint/{n}/reset` — supprime blocs + congés d'un sprint (optional `team_member_id`)
 
 **Settings**: All configuration stored in `app_settings` table. Keys: `azdo_organization`, `azdo_project`, `azdo_team`, `azdo_pat`, `llm_provider` (openai/anthropic/azure), `llm_model`, `llm_api_key`, `llm_endpoint` (Azure AI Foundry URL), `capacity_matrix_dev/qa/psm`, `block_colors`.
 
-**PBRItem fields**: `action_plan`, `ia_dor_note`, `ia_comment`, `ia_analyzed_at`, `refinement_owner_id` (FK TeamMember, nullable), `is_deprioritized` (bool, default false). Parents (depth=0) support: plan d'action, responsable de refinement, toggle déprioritisation. Children visually inherit deprioritized state of their parent.
+**PBRItem fields**: `action_plan`, `ia_dor_note` (/5 scale), `ia_comment`, `ia_analyzed_at`, `refinement_owner_id` (FK TeamMember, nullable), `is_deprioritized` (bool, default false). Parents (depth=0) support: plan d'action, responsable de refinement, toggle déprioritisation. Children visually inherit deprioritized state of their parent.
 
 **PBR API notable endpoints**:
 - `POST /pbr/sessions/{id}/copy` — duplique une session (items sans votes, conserve action_plan/refinement_owner/is_deprioritized)
@@ -87,6 +99,25 @@ cd frontend && npx ng build --configuration=development
 - `POST /suivi/pi/{id}/sprint/{n}/capacities/import` — Import from PlanningBlocks Layer 1
 - `POST /suivi/pi/{id}/sprint/{n}/analyze-member/{m}` — LLM productivity analysis (saves as PRODUCTIVITY_REPORT)
 - `GET /suivi/pi/{id}/sprint/{n}/analyze-member/{m}/latest` — Retrieve saved report
+- `GET /suivi/pi/{id}/sprint/{n}/planned-stories` — Layer 2 stories grouped by Feature/Enabler parent, with DoR status from most recent PBRItem
+- `POST /suivi/analyze-wi/{azdo_wi_id}` — Direct DoR analysis for a work item (no PBRItem required); updates PBRItem if one exists
+- `POST /suivi/pi/{id}/sprint/{n}/scrum-of-scrums` — Generates a Scrum of Scrums CR via LLM from sprint data
+
+**Admin PI** (`admin.py`): AZDO write operations panel, mounted at `/api/admin`.
+- `GET /admin/pi/{id}/check-iterations` — Vérifie cohérence des itérations AZDO
+- `POST /admin/pi/{id}/create-missing-iterations` — Crée les itérations manquantes dans AZDO
+- `GET /admin/pi/{id}/unclosed-items` — WI non clôturés du PI précédent
+- `POST /admin/pi/{id}/close-items` — Ferme les WI sélectionnés (→ Closed)
+- `POST /admin/pi/{id}/resolve-items` — Résout les WI (→ Resolved + Isagri.ResolvedReason)
+- `POST /admin/pi/{id}/move-items` — Déplace les WI vers un sprint du PI en cours
+- `GET /admin/pi/{id}/check-parent-iterations` — Vérifie chemins parents des stories planifiées
+- `GET /admin/pi/{id}/story-tasks/preview` — Prévisualise les tâches enfants à créer
+- `POST /admin/pi/{id}/story-tasks/create` — Crée les tâches enfants dans AZDO
+
+**Admin AZDO fields**:
+- `Isagri.ResolvedReason` — raison de résolution (hors Tasks)
+- `System.LinkTypes.Hierarchy-Reverse` — lien parent pour les tâches créées
+- `_team_base_path(pi_path, team)` — helper qui évite de doubler le nom de l'équipe dans le chemin
 
 **SprintCapacity model** (`sprint_capacity` table): `pi_id`, `sprint_number`, `team_member_id` (UNIQUE together), plus 7 capacity fields in hours: `capa_stories_h`, `capa_bugs_h`, `capa_imprevus_h`, `capa_agility_h`, `capa_reunions_h`, `capa_psm_h`, `capa_montee_h`.
 
@@ -94,14 +125,26 @@ cd frontend && npx ng build --configuration=development
 
 **PBR groupedItems**: frontend groups items by parent-child using `WorkItem.parent_id`. depth=0 = enabler/feature or orphan, depth=1 = child story. Grouping is computed client-side from the `workItemsMap`.
 
+**WorkItem.id**: IS the AZDO work item ID (no auto-increment). Used directly in AZDO API calls.
+
 ### Schema Migrations
 
 SQLite doesn't support `ALTER COLUMN`. New columns are added via `_run_migrations()` in `database.py`. Always add new `ALTER TABLE ... ADD COLUMN` statements there, wrapped in try/except.
 
 ### Azure DevOps Integration
 
-- PAT requires: Work Items Read, Iterations Read
-- All AZDO calls are **read-only** — no writes to AZDO ever
+- PAT requires: Work Items Read+Write, Iterations Read+Write (write needed for Admin PI)
+- **Read-only operations**: all sync operations, WIQL queries, classification node reads
+- **Write operations** (Admin PI only): `update_work_item`, `create_work_item`, `create_classification_node`
 - Sync is manual (triggered from Paramètres → Données synchronisées)
 - `sync_all()` stores per-type counts in `SyncLog.details` as JSON string
 - AZDO iterations URL format: `https://dev.azure.com/{org}/{project}/{team}/_apis/work/teamsettings/iterations`
+
+### Planned: Triggers / Automatisations Module
+
+Future module using **APScheduler** integrated in FastAPI. Requires Azure App Service **Always-On** enabled (Basic B1+). Three planned actions:
+1. `azdo_sync_incremental` — incremental AZDO sync from last known date
+2. `bug_triage_assignment` — AI agent battery for bug prioritization and assignment
+3. `appinsights_bug_creation` — Azure App Insights → automatic AZDO bug creation
+
+New `app_settings` keys needed: `appinsights_app_id`, `appinsights_api_key`, `azdo_last_incremental_sync`.
