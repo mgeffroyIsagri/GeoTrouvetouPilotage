@@ -38,7 +38,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.10'
 
       - name: Install Python dependencies (validation)
         run: |
@@ -74,6 +74,9 @@ jobs:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_308EDDEA5F1345A089E660FD434EC151 }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_D78652BAAB6B49699C126BE5AF5C707D }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_D9A9B735DB4B47A88C97BF79A6009B80 }}
+
+      - name: Set App Service Python runtime to 3.10
+        run: az webapp config set --name geotrouvetouweb --resource-group rg-geotrouvetou --linux-fx-version "PYTHON|3.10"
 
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
